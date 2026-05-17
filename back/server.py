@@ -26,8 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from grammar.grammar import Grammar
-from parsers.recursive_descent import RecursiveDescentParser
-
+from parsers.descenso_recursivo import RecursiveDescentParser
 # ──────────────────────────────────────────────────────────────────────────── #
 # App
 # ──────────────────────────────────────────────────────────────────────────── #
