@@ -157,37 +157,43 @@ def parse_recursive_descent(request: ParseRequest):
 # LL(1)  🔜
 # ──────────────────────────────────────────────────────────────────────────── #
 
-# @app.post("/parse/ll1")
-# def parse_ll1(request: ParseRequest):
-#     grammar = build_grammar(request.grammar_text)
-#     from parsers.ll1 import LL1Parser
-#     parser = LL1Parser(grammar)
-#     result = parser.parse(request.input_string)
-#     return {
-#         "method": "ll1",
-#         "grammar": grammar.to_dict(),
-#         "parsing_table": parser.get_table(),
-#         "result": result.to_dict(),
-#     }
+@app.post("/parse/ll1")
+def parse_ll1(request: ParseRequest):
+    grammar = build_grammar(request.grammar_text)
+    try:
+        from parsers.ll1 import LL1Parser
+        parser = LL1Parser(grammar)
+        result = parser.parse(request.input_string)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "method": "ll1",
+        "grammar": grammar.to_dict(),
+        "parsing_table": parser.get_table(),
+        "result": result.to_dict(),
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
 # LR(0)  🔜
 # ──────────────────────────────────────────────────────────────────────────── #
 
-# @app.post("/parse/lr0")
-# def parse_lr0(request: ParseRequest):
-#     grammar = build_grammar(request.grammar_text)
-#     from parsers.lr0 import LR0Parser
-#     parser = LR0Parser(grammar)
-#     result = parser.parse(request.input_string)
-#     return {
-#         "method": "lr0",
-#         "grammar": grammar.to_dict(),
-#         "automaton": parser.get_automaton(),
-#         "parsing_table": parser.get_table(),
-#         "result": result.to_dict(),
-#     }
+@app.post("/parse/lr0")
+def parse_lr0(request: ParseRequest):
+    grammar = build_grammar(request.grammar_text)
+    try:
+        from parsers.lr0 import LR0Parser
+        parser = LR0Parser(grammar)
+        result = parser.parse(request.input_string)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "method": "lr0",
+        "grammar": grammar.to_dict(),
+        "automaton": parser.get_automaton(),
+        "parsing_table": parser.get_table(),
+        "result": result.to_dict(),
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
