@@ -4,21 +4,76 @@ ll1.py
 Parser LL(1) predictivo con construcción de tabla.
 
 Provee:
- - `LL1Parser(grammar)` construye la tabla predictiva (o lanza error si hay conflicto)
- - `parse(input_string)` realiza el parse usando la tabla y devuelve un ParseResult
- - `get_table()` devuelve la tabla en formato serializable
+ - `LL1Parser(grammar)` construye la tabla predictiva
+ - `parse(input_string)` realiza el parse usando la tabla y devuelve un ParseResult compatible con LR
 """
 from __future__ import annotations
+from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional
 
 from grammar.grammar import Grammar, EPSILON
-from parsers.descenso_recursivo import ParseResult, ParseNode
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Resultado
+# ══════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class ParseStep:
+    step_number: int
+    action: str       
+    description: str
+    stack: list
+    remaining_input: list
+    production_used: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "step_number":    self.step_number,
+            "action":         self.action,
+            "description":    self.description,
+            "stack":          self.stack,
+            "remaining_input": self.remaining_input,
+            "production_used": self.production_used,
+        }
+
+@dataclass
+class ParseResult:
+    is_valid: bool
+    steps: list
+    action_table: dict   
+    goto_table: dict    
+    first: dict          
+    follow: dict         
+    states: list
+    conflicts: list
+    error_message: Optional[str]
+    tokens_consumed: int
+    total_tokens: int
+
+    def to_dict(self) -> dict:
+        return {
+            "is_valid":        self.is_valid,
+            "steps":           self.steps,
+            "action_table":    self.action_table,
+            "goto_table":      self.goto_table,
+            "first":           self.first,
+            "follow":          self.follow,
+            "states":          self.states,
+            "conflicts":       self.conflicts,
+            "error_message":   self.error_message,
+            "tokens_consumed": self.tokens_consumed,
+            "total_tokens":    self.total_tokens,
+        }
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Parser LL(1)
+# ══════════════════════════════════════════════════════════════════════════════
 
 class LL1Parser:
     def __init__(self, grammar: Grammar):
         self.grammar = grammar
         self.table: Dict[Tuple[str, str], List[str]] = {}
+        self.conflicts: list = []
         self._build_table()
 
     def _build_table(self):
@@ -30,14 +85,14 @@ class LL1Parser:
                 for a in (first_alpha - {EPSILON}):
                     key = (A, a)
                     if key in self.table and self.table[key] != alpha:
-                        raise ValueError(f"Conflicto LL(1) en celda {key}: {self.table[key]} vs {alpha}")
+                        self.conflicts.append(f"Conflicto LL(1) en celda {key}: {self.table[key]} vs {alpha}")
                     self.table[key] = alpha
                 # Si ε está en FIRST(alpha), para cada b en FOLLOW(A) poner A->α en (A,b)
                 if EPSILON in first_alpha:
                     for b in self.grammar.follow(A):
                         key = (A, b)
                         if key in self.table and self.table[key] != alpha:
-                            raise ValueError(f"Conflicto LL(1) en celda {key}: {self.table[key]} vs {alpha}")
+                            self.conflicts.append(f"Conflicto LL(1) en celda {key}: {self.table[key]} vs {alpha}")
                         self.table[key] = alpha
 
     def get_table(self) -> Dict[str, Dict[str, List[str]]]:
@@ -47,54 +102,178 @@ class LL1Parser:
         return out
 
     def parse(self, input_string: str) -> ParseResult:
-        tokens = input_string.strip().split()
+        tokens = input_string.strip().split() if input_string.strip() else []
         if not tokens:
-            return ParseResult(False, None, [], "La cadena de entrada está vacía.", 0, 0)
+            return self._make_result(
+                is_valid=False,
+                steps=[],
+                error_message="La cadena de entrada está vacía.",
+                tokens_consumed=0,
+                total_tokens=0
+            )
 
-        tokens.append("$")
-        stack: List[Tuple[str, ParseNode]] = []
-        root = ParseNode(symbol=self.grammar.start_symbol)
-        stack.append((self.grammar.start_symbol, root))
-
+        tokens_eof = tokens + ["$"]
+        stack = ["$", self.grammar.start_symbol]
         pos = 0
-        steps = []
+        steps: list[ParseStep] = []
+        step_n = 0
+
+        def add_step(action, description, production=None):
+            nonlocal step_n
+            step_n += 1
+            steps.append(ParseStep(
+                step_number=step_n,
+                action=action,
+                description=description,
+                stack=list(stack),
+                remaining_input=list(tokens_eof[pos:]),
+                production_used=production,
+            ))
 
         try:
             while stack:
-                symbol, node = stack.pop()
-                current = tokens[pos] if pos < len(tokens) else "$"
+                top = stack[-1]
+                current = tokens_eof[pos]
 
-                if symbol == EPSILON:
-                    node.children.append(ParseNode(symbol=EPSILON, is_terminal=True))
-                    continue
-
-                # Terminal (incluye $)
-                if symbol not in self.grammar.productions:
-                    if symbol == current:
-                        node.is_terminal = True
-                        node.matched_token = current
-                        pos += 1
-                        continue
+                if top == "$":
+                    if current == "$":
+                        add_step("accept", "✓ Cadena ACEPTADA.")
+                        stack.pop()
+                        return self._make_result(
+                            is_valid=True,
+                            steps=steps,
+                            error_message=None,
+                            tokens_consumed=pos,
+                            total_tokens=len(tokens)
+                        )
                     else:
-                        raise ValueError(f"match(): se esperaba '{symbol}' pero se encontró '{current}'.")
+                        add_step("error", f"✗ Token '{current}' inesperado al final de la pila.")
+                        return self._make_result(
+                            is_valid=False,
+                            steps=steps,
+                            error_message=f"Se esperaba '$' pero se encontró '{current}'.",
+                            tokens_consumed=pos,
+                            total_tokens=len(tokens)
+                        )
 
-                # Non-terminal: buscar producción en la tabla
-                key = (symbol, current)
-                prod = self.table.get(key)
-                if prod is None:
-                    raise ValueError(f"Tabla LL(1): no hay entrada para ({symbol}, '{current}').")
+                elif top in self.grammar.terminals or top == EPSILON:
+                    if top == EPSILON:
+                        stack.pop()
+                        add_step("match", "Se hizo match de ε (se elimina de la pila).")
+                    elif top == current:
+                        stack.pop()
+                        add_step("match", f"Se hizo match de '{current}'.")
+                        pos += 1
+                    else:
+                        add_step("error", f"✗ Token '{current}' no coincide con el tope de la pila '{top}'.")
+                        return self._make_result(
+                            is_valid=False,
+                            steps=steps,
+                            error_message=f"Se esperaba '{top}' pero se encontró '{current}'.",
+                            tokens_consumed=pos,
+                            total_tokens=len(tokens)
+                        )
+                
+                else:
+                    # Non-terminal
+                    key = (top, current)
+                    prod = self.table.get(key)
+                    if prod is None:
+                        add_step("error", f"✗ No hay entrada en la tabla para ({top}, '{current}').")
+                        return self._make_result(
+                            is_valid=False,
+                            steps=steps,
+                            error_message=f"Error de sintaxis en el token '{current}'.",
+                            tokens_consumed=pos,
+                            total_tokens=len(tokens)
+                        )
 
-                # Crear nodos hijos y empujar en stack (en orden inverso)
-                children = [ParseNode(s) for s in prod]
-                node.children = children
-                for child in reversed(children):
-                    stack.append((child.symbol, child))
+                    stack.pop()
+                    # Push in reverse order
+                    if prod != [EPSILON] and prod != []:
+                        for sym in reversed(prod):
+                            stack.append(sym)
+                    
+                    prod_str = f"{top} → {' '.join(prod) if prod else EPSILON}"
+                    add_step("predict", f"Reemplazar '{top}' usando {prod_str}.", production=prod_str)
 
-            if pos != len(tokens) - 1:
-                leftover = " ".join(tokens[pos:])
-                raise ValueError(f"Sobran tokens al finalizar parse: '{leftover}'")
-
-            return ParseResult(True, root.to_dict(), [], None, pos, len(tokens) - 1)
+            # Esto teóricamente no se alcanza si la gramática está bien formada, 
+            # ya que el $ del stack debería coincidir con el $ de la entrada
+            if pos != len(tokens_eof) - 1:
+                leftover = " ".join(tokens_eof[pos:])
+                return self._make_result(
+                    is_valid=False,
+                    steps=steps,
+                    error_message=f"Sobran tokens al finalizar parse: '{leftover}'",
+                    tokens_consumed=pos,
+                    total_tokens=len(tokens)
+                )
+            
+            return self._make_result(
+                is_valid=True,
+                steps=steps,
+                error_message=None,
+                tokens_consumed=pos,
+                total_tokens=len(tokens)
+            )
 
         except Exception as e:
-            return ParseResult(False, None, [], str(e), pos, len(tokens) - 1)
+            return self._make_result(
+                is_valid=False,
+                steps=steps,
+                error_message=str(e),
+                tokens_consumed=pos,
+                total_tokens=len(tokens)
+            )
+
+    def _make_result(self, *, is_valid, steps, error_message, tokens_consumed, total_tokens) -> ParseResult:
+        action_table = self._format_table()
+        return ParseResult(
+            is_valid=is_valid,
+            steps=[s.to_dict() for s in steps],
+            action_table=action_table,
+            goto_table={"nonterminals": [], "rows": []},
+            first={
+                nt: sorted(v - {EPSILON}) + (["ε"] if EPSILON in v else [])
+                for nt, v in self.grammar._first.items()
+            },
+            follow={
+                nt: sorted(v - {"$"}) + (["$"] if "$" in v else [])
+                for nt, v in self.grammar._follow.items()
+            },
+            states=[],
+            conflicts=self.conflicts,
+            error_message=error_message,
+            tokens_consumed=tokens_consumed,
+            total_tokens=total_tokens,
+        )
+
+    def _format_table(self) -> dict:
+        terminals = sorted(self.grammar.terminals | {"$"})
+        nonterminals = list(self.grammar.productions.keys())
+        rows = []
+        for nt in nonterminals:
+            row: dict = {"state": nt}
+            for t in terminals:
+                prod = self.table.get((nt, t))
+                if prod is not None:
+                    row[t] = f"{nt} → {' '.join(prod) if prod else EPSILON}"
+                else:
+                    row[t] = ""
+            rows.append(row)
+
+        productions_legend = []
+        for A, alternatives in self.grammar.productions.items():
+            for alpha in alternatives:
+                prod_str = f"{A} → {' '.join(alpha) if alpha else EPSILON}"
+                if not any(p["production"] == prod_str for p in productions_legend):
+                    productions_legend.append({
+                        "index": len(productions_legend),
+                        "production": prod_str
+                    })
+
+        return {
+            "terminals": terminals,
+            "rows": rows,
+            "productions": productions_legend
+        }
