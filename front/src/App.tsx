@@ -3,6 +3,7 @@ import { useState, useRef, useMemo } from "react";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ParserMethod = "recursive-descent" | "ll1" | "lr0" | "slr1" | "lalr1" | "lr1";
+type AutomataView = "afd" | "afn" | "lr1_afn" | "lr1" | "lalr1";
 
 interface RDParseStep {
   step_number: number;
@@ -108,6 +109,81 @@ interface DFATransition {
   symbol: string;
 }
 
+// ─── LR(1) / LALR(1) types ────────────────────────────────────────────────────
+
+interface LR1Item {
+  label: string;
+  lhs: string;
+  rhs: string[];
+  dot: number;
+  lookahead: string;
+  completed: boolean;
+}
+
+interface LALR1Item {
+  label: string;
+  lhs: string;
+  rhs: string[];
+  dot: number;
+  lookaheads: string[];
+  completed: boolean;
+}
+
+interface LR1State {
+  id: string;
+  label: string;
+  items: LR1Item[];
+  is_accept: boolean;
+  is_start: boolean;
+}
+
+interface LALR1State {
+  id: string;
+  label: string;
+  items: LALR1Item[];
+  lr1_ids: string[];
+  is_accept: boolean;
+  is_start: boolean;
+}
+
+interface LR1Automata {
+  type: string;
+  states: LR1State[];
+  transitions: DFATransition[];
+  start_state: string;
+  accept_states: string[];
+}
+
+interface LALR1Automata {
+  type: string;
+  states: LALR1State[];
+  transitions: DFATransition[];
+  start_state: string;
+  accept_states: string[];
+}
+
+// Nodo del AFN LR(1): cada Item1 individual es un nodo
+interface LR1NFAState {
+  id: string;
+  label: string;
+  is_accept: boolean;
+  is_start: boolean;
+  lhs: string;
+  rhs: string[];
+  dot: number;
+  lookahead: string;
+  completed: boolean;
+}
+
+interface LR1NFAAutomata {
+  type: string;
+  states: LR1NFAState[];
+  transitions: NFATransition[];
+  epsilon_transitions: NFATransition[];
+  start_state: string;
+  accept_states: string[];
+}
+
 interface AutomataResponse {
   afn: {
     type: string;
@@ -124,6 +200,9 @@ interface AutomataResponse {
     start_state: string;
     accept_states: string[];
   };
+  lr1_afn: LR1NFAAutomata;
+  lr1: LR1Automata;
+  lalr1: LALR1Automata;
 }
 
 interface GrammarInfo {
@@ -135,7 +214,7 @@ interface GrammarInfo {
   follow: Record<string, string[]>;
 }
 
-// ─── Graph node/link types (sin D3) ──────────────────────────────────────────
+// ─── Graph node/link types ────────────────────────────────────────────────────
 
 interface GraphNode {
   id: string;
@@ -156,11 +235,11 @@ interface GraphLink {
 
 const PARSERS: { id: ParserMethod; label: string; ready: boolean }[] = [
   { id: "recursive-descent", label: "Descenso Recursivo", ready: true },
-  { id: "ll1",   label: "LL(1)",   ready: false },
-  { id: "lr0",   label: "LR(0)",   ready: false },
+  { id: "ll1",   label: "LL(1)",   ready: true },
+  { id: "lr0",   label: "LR(0)",   ready: true },
   { id: "slr1",  label: "SLR(1)",  ready: true },
-  { id: "lalr1", label: "LALR(1)", ready: false },
-  { id: "lr1",   label: "LR(1)",   ready: false },
+  { id: "lalr1", label: "LALR(1)", ready: true },
+  { id: "lr1",   label: "LR(1)",   ready: true },
 ];
 
 const DEFAULT_GRAMMAR = `E -> T E2
@@ -207,6 +286,14 @@ const SLR_STEP_ICONS: Record<string, string> = {
   error:  "✗",
 };
 
+const AUTOMATA_VIEW_LABELS: Record<AutomataView, string> = {
+  afd:     "LR(0) DFA",
+  afn:     "LR(0) NFA",
+  lr1_afn: "LR(1) NFA",
+  lr1:     "LR(1) DFA",
+  lalr1:   "LALR(1)",
+};
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function App() {
@@ -220,7 +307,7 @@ export default function App() {
   const [automataLoading, setAutomataLoading] = useState(false);
   const [error, setError]             = useState<string | null>(null);
   const [activeTab, setActiveTab]     = useState<"steps" | "table" | "tree" | "grammar" | "automata">("steps");
-  const [automataView, setAutomataView] = useState<"afd" | "afn">("afd");
+  const [automataView, setAutomataView] = useState<AutomataView>("afd");
 
   const handleMethodChange = (m: ParserMethod) => {
     setMethod(m);
@@ -228,10 +315,10 @@ export default function App() {
     setSlrResponse(null);
     setAutomata(null);
     setError(null);
-    if (m === "slr1") {
-      setGrammarText(DEFAULT_GRAMMAR_SLR);
-    } else if (m === "recursive-descent") {
+    if (m === "recursive-descent" || m === "ll1") {
       setGrammarText(DEFAULT_GRAMMAR);
+    } else {
+      setGrammarText(DEFAULT_GRAMMAR_SLR);
     }
     setActiveTab("steps");
   };
@@ -252,8 +339,8 @@ export default function App() {
         throw new Error(data.detail ?? "Error del servidor");
       }
       const data = await res.json();
-      if (method === "recursive-descent") setRdResponse(data as RDApiResponse);
-      else if (method === "slr1") setSlrResponse(data as SLRApiResponse);
+      if (method === "slr1") setSlrResponse(data as SLRApiResponse);
+      else setRdResponse(data as RDApiResponse);
       setActiveTab("steps");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Error desconocido");
@@ -266,7 +353,8 @@ export default function App() {
     setAutomataLoading(true);
     setError(null);
     try {
-      const res = await fetch("http://localhost:8000/grammar/automata", {
+      // Usa el endpoint unificado que devuelve afn, afd, lr1 y lalr1
+      const res = await fetch("http://localhost:8000/grammar/automata/all", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ grammar_text: grammarText }),
@@ -276,9 +364,9 @@ export default function App() {
         throw new Error(data.detail ?? "Error del servidor");
       }
       const automataData = await res.json();
-      console.log("automata response:", JSON.stringify(automataData).slice(0, 300));
       setAutomata(automataData);
       setActiveTab("automata");
+      setAutomataView("afd");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Error desconocido");
     } finally {
@@ -286,17 +374,17 @@ export default function App() {
     }
   }
 
-  const currentResult  = method === "slr1" ? slrResponse?.result  : rdResponse?.result;
-  const currentGrammar = method === "slr1" ? slrResponse?.grammar : rdResponse?.grammar;
-  const hasResponse    = method === "slr1" ? !!slrResponse : !!rdResponse;
   const isSLR          = method === "slr1";
+  const currentResult  = isSLR ? slrResponse?.result  : rdResponse?.result;
+  const currentGrammar = isSLR ? slrResponse?.grammar : rdResponse?.grammar;
+  const hasResponse    = isSLR ? !!slrResponse : !!rdResponse;
 
   const tabs = [
-    { id: "steps"   as const, label: "Pasos",       show: hasResponse },
-    { id: "table"   as const, label: "Tabla",        show: hasResponse && isSLR },
-    { id: "tree"    as const, label: "Árbol",        show: hasResponse && !isSLR },
-    { id: "grammar" as const, label: "Gramática",    show: hasResponse },
-    { id: "automata"as const, label: "Autómata LR",  show: !!automata },
+    { id: "steps"    as const, label: "Pasos",      show: hasResponse },
+    { id: "table"    as const, label: "Tabla",       show: hasResponse && isSLR },
+    { id: "tree"     as const, label: "Árbol",       show: hasResponse && !isSLR },
+    { id: "grammar"  as const, label: "Gramática",   show: hasResponse },
+    { id: "automata" as const, label: "Autómata LR", show: !!automata },
   ].filter(t => t.show);
 
   return (
@@ -349,7 +437,7 @@ export default function App() {
                          border border-purple-400/20 hover:border-purple-400/40
                          disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {automataLoading ? "⟳ Generando..." : "◈ Autómata LR(0)"}
+              {automataLoading ? "⟳ Generando..." : "◈ Autómatas LR"}
             </button>
           </div>
         </aside>
@@ -427,7 +515,7 @@ export default function App() {
                 )}
                 {automata && !hasResponse && (
                   <span className="px-3 py-1 rounded text-xs font-bold border bg-purple-400/10 border-purple-400/40 text-purple-400">
-                    ◈ Autómata LR(0)
+                    ◈ Autómatas LR
                   </span>
                 )}
                 <div className="ml-auto flex gap-1">
@@ -533,7 +621,11 @@ export default function App() {
                 )}
 
                 {activeTab === "automata" && automata && (
-                  <AutomataView automata={automata} view={automataView} setView={setAutomataView} />
+                  <AutomataView
+                    automata={automata}
+                    view={automataView}
+                    setView={setAutomataView}
+                  />
                 )}
               </div>
             </div>
@@ -724,57 +816,96 @@ function AutomataView({
   setView,
 }: {
   automata: AutomataResponse;
-  view: "afd" | "afn";
-  setView: (v: "afd" | "afn") => void;
+  view: AutomataView;
+  setView: (v: AutomataView) => void;
 }) {
   const [expandedState, setExpandedState] = useState<string | null>(null);
   const { afd: dfa, afn: nfa } = automata;
 
-  // Guard: si el backend no devolvió la estructura esperada, mostramos error
   if (!dfa?.states || !nfa?.states) {
     return (
       <div className="p-6 text-red-400 text-xs">
         ✗ La respuesta del servidor no tiene el formato esperado.
-        Verifica que <code>/grammar/automata</code> devuelva <code>{"{ afn, afd }"}</code>.
+        Verifica que <code>/grammar/automata/all</code> devuelva <code>{"{ afn, afd, lr1, lalr1 }"}</code>.
       </div>
     );
   }
 
-  // Build graph data without D3 types
-  const graphData: { nodes: GraphNode[]; links: GraphLink[] } = view === "afd"
-    ? {
-        nodes: dfa.states.map(s => ({
-          id: s.id,
-          label: s.label,
-          isStart: s.is_start,
-          isAccept: s.is_accept,
-          items: s.items.map(i => i.label),
-        })),
-        links: dfa.transitions.map(t => ({
-          source: t.from,
-          target: t.to,
-          symbol: t.symbol,
-          type: "real" as const,
-        })),
-      }
-    : {
+  // ── Datos para el grafo según la vista activa ──────────────────────────────
+
+  const graphData: { nodes: GraphNode[]; links: GraphLink[] } = (() => {
+    if (view === "afn") {
+      return {
         nodes: nfa.states.map(s => ({
-          id: s.id,
-          label: s.label,
-          isStart: s.is_start,
-          isAccept: s.is_accept,
+          id: s.id, label: s.label,
+          isStart: s.is_start, isAccept: s.is_accept,
         })),
         links: [
           ...nfa.transitions.map(t => ({ source: t.from, target: t.to, symbol: t.symbol, type: "real" as const })),
           ...nfa.epsilon_transitions.map(t => ({ source: t.from, target: t.to, symbol: "ε", type: "epsilon" as const })),
         ],
       };
+    }
+    if (view === "lr1_afn" && automata.lr1_afn) {
+      return {
+        nodes: automata.lr1_afn.states.map(s => ({
+          id: s.id, label: s.label,
+          isStart: s.is_start, isAccept: s.is_accept,
+        })),
+        links: [
+          ...automata.lr1_afn.transitions.map(t => ({ source: t.from, target: t.to, symbol: t.symbol, type: "real" as const })),
+          ...automata.lr1_afn.epsilon_transitions.map(t => ({ source: t.from, target: t.to, symbol: "ε", type: "epsilon" as const })),
+        ],
+      };
+    }
+    if (view === "lr1" && automata.lr1) {
+      return {
+        nodes: automata.lr1.states.map(s => ({
+          id: s.id, label: s.label,
+          isStart: s.is_start, isAccept: s.is_accept,
+          items: s.items.map(i => i.label),
+        })),
+        links: automata.lr1.transitions.map(t => ({
+          source: t.from, target: t.to, symbol: t.symbol, type: "real" as const,
+        })),
+      };
+    }
+    if (view === "lalr1" && automata.lalr1) {
+      return {
+        nodes: automata.lalr1.states.map(s => ({
+          id: s.id, label: s.label,
+          isStart: s.is_start, isAccept: s.is_accept,
+          items: s.items.map(i => i.label),
+        })),
+        links: automata.lalr1.transitions.map(t => ({
+          source: t.from, target: t.to, symbol: t.symbol, type: "real" as const,
+        })),
+      };
+    }
+    // default: afd / LR(0) DFA
+    return {
+      nodes: dfa.states.map(s => ({
+        id: s.id, label: s.label,
+        isStart: s.is_start, isAccept: s.is_accept,
+        items: s.items.map(i => i.label),
+      })),
+      links: dfa.transitions.map(t => ({
+        source: t.from, target: t.to, symbol: t.symbol, type: "real" as const,
+      })),
+    };
+  })();
+
+  // ── Contadores para el subtitle ────────────────────────────────────────────
+  const statCount = graphData.nodes.length;
+  const transCount = graphData.links.length;
 
   return (
     <div className="p-4 flex flex-col gap-3">
+
+      {/* Toggle de vistas */}
       <div className="flex items-center gap-3">
         <div className="flex gap-1">
-          {(["afd", "afn"] as const).map((v) => (
+          {(["afd", "afn", "lr1_afn", "lr1", "lalr1"] as const).map((v) => (
             <button
               key={v}
               onClick={() => { setView(v); setExpandedState(null); }}
@@ -784,28 +915,37 @@ function AutomataView({
                   : "text-zinc-500 hover:text-zinc-300 border border-transparent"
               }`}
             >
-              {v.toUpperCase()}
+              {AUTOMATA_VIEW_LABELS[v]}
             </button>
           ))}
         </div>
         <span className="text-xs text-zinc-600">
-          {view === "afd"
-            ? `${dfa.states.length} estados · ${dfa.transitions.length} transiciones`
-            : `${nfa.states.length} items · ${nfa.transitions.length + nfa.epsilon_transitions.length} transiciones`}
+          {statCount} estados · {transCount} transiciones
+          {view === "afn" && ` (${nfa.epsilon_transitions.length} ε)`}
+          {view === "lr1_afn" && automata.lr1_afn && ` (${automata.lr1_afn.epsilon_transitions.length} ε)`}
+          {view === "lalr1" && automata.lalr1 && (
+            <span className="ml-2 text-zinc-700">
+              fusionado desde {automata.lr1?.states.length ?? "?"} estados LR(1)
+            </span>
+          )}
         </span>
       </div>
 
+      {/* Cuerpo principal */}
       <div className="flex gap-3" style={{ height: 520 }}>
-        {/* Graph SVG */}
+
+        {/* Grafo SVG */}
         <div className="rounded border border-zinc-800 bg-zinc-950 overflow-hidden" style={{ flex: "0 0 63%" }}>
           <StaticAutomataGraph key={view} data={graphData} />
         </div>
 
-        {/* State list panel */}
+        {/* Panel lateral */}
         <div className="flex flex-col flex-1 gap-2 overflow-hidden">
+
+          {/* ── LR(0) DFA ── */}
           {view === "afd" && (
             <>
-              <p className="text-[10px] text-zinc-500 uppercase tracking-widest flex-shrink-0">Estados DFA</p>
+              <p className="text-[10px] text-zinc-500 uppercase tracking-widest shrink-0">Estados LR(0) DFA</p>
               <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
                 {dfa.states.map((state) => {
                   const isSelected = expandedState === state.id;
@@ -823,9 +963,7 @@ function AutomataView({
                       <div className="flex items-center gap-2 mb-1">
                         <span className={`text-xs font-bold ${
                           state.is_start ? "text-green-400" : state.is_accept ? "text-yellow-400" : "text-purple-400"
-                        }`}>
-                          {state.label}
-                        </span>
+                        }`}>{state.label}</span>
                         {state.is_start  && <span className="text-[10px] text-green-600 border border-green-900 rounded px-1">inicio</span>}
                         {state.is_accept && <span className="text-[10px] text-yellow-600 border border-yellow-900 rounded px-1">accept</span>}
                         <span className="ml-auto text-[10px] text-zinc-600">{isSelected ? "▲" : "▼"}</span>
@@ -856,7 +994,7 @@ function AutomataView({
                   );
                 })}
               </div>
-              <div className="flex gap-3 text-[10px] text-zinc-600 flex-shrink-0 pt-1">
+              <div className="flex gap-3 text-[10px] text-zinc-600 shrink-0 pt-1">
                 <span><span className="text-green-400">■</span> Inicio</span>
                 <span><span className="text-yellow-400">■</span> Accept</span>
                 <span><span className="text-purple-400">■</span> Intermedio</span>
@@ -864,6 +1002,7 @@ function AutomataView({
             </>
           )}
 
+          {/* ── LR(0) NFA ── */}
           {view === "afn" && (
             <div className="flex-1 overflow-y-auto flex flex-col gap-4 pr-1">
               <div>
@@ -919,6 +1058,227 @@ function AutomataView({
               </div>
             </div>
           )}
+
+          {/* ── LR(1) NFA ── */}
+          {view === "lr1_afn" && automata.lr1_afn && (
+            <div className="flex-1 overflow-y-auto flex flex-col gap-4 pr-1">
+              <div>
+                <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">
+                  Transiciones reales ({automata.lr1_afn.transitions.length})
+                </p>
+                <div className="flex flex-col gap-0.5">
+                  {automata.lr1_afn.transitions.map((t, i) => {
+                    const fromLabel = automata.lr1_afn.states.find(s => s.id === t.from)?.label ?? t.from;
+                    const toLabel   = automata.lr1_afn.states.find(s => s.id === t.to)?.label   ?? t.to;
+                    return (
+                      <div key={i} className="text-[10px] font-mono">
+                        <span className="text-zinc-400 truncate max-w-[120px] inline-block align-bottom">[{fromLabel}]</span>
+                        <span className="text-yellow-400 mx-1">─{t.symbol}→</span>
+                        <span className="text-zinc-400 truncate max-w-[120px] inline-block align-bottom">[{toLabel}]</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">
+                  Transiciones ε ({automata.lr1_afn.epsilon_transitions.length})
+                </p>
+                <div className="flex flex-col gap-0.5">
+                  {automata.lr1_afn.epsilon_transitions.map((t, i) => {
+                    const fromLabel = automata.lr1_afn.states.find(s => s.id === t.from)?.label ?? t.from;
+                    const toLabel   = automata.lr1_afn.states.find(s => s.id === t.to)?.label   ?? t.to;
+                    return (
+                      <div key={i} className="text-[10px] font-mono">
+                        <span className="text-zinc-500 truncate max-w-[120px] inline-block align-bottom">[{fromLabel}]</span>
+                        <span className="text-purple-400 mx-1">─ε→</span>
+                        <span className="text-zinc-500 truncate max-w-[120px] inline-block align-bottom">[{toLabel}]</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">
+                  Items de aceptación ({automata.lr1_afn.accept_states.length})
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {automata.lr1_afn.accept_states.map(id => {
+                    const state = automata.lr1_afn.states.find(s => s.id === id);
+                    return (
+                      <span key={id} className="text-[10px] bg-yellow-400/10 border border-yellow-400/30 text-yellow-400 px-2 py-0.5 rounded font-mono">
+                        {state?.label ?? id}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="flex gap-3 text-[10px] text-zinc-600 shrink-0 pt-1 border-t border-zinc-800">
+                <span><span className="text-yellow-400">─→</span> Real</span>
+                <span><span className="text-purple-400">─ε→</span> Épsilon</span>
+                <span><span className="text-yellow-300">■</span> Reducción</span>
+                <span><span className="text-orange-400">■</span> Lookahead</span>
+              </div>
+            </div>
+          )}
+
+          {/* ── LR(1) ── */}
+          {view === "lr1" && automata.lr1 && (
+            <>
+              <p className="text-[10px] text-zinc-500 uppercase tracking-widest shrink-0">
+                Estados LR(1) — {automata.lr1.states.length} estados
+              </p>
+              <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
+                {automata.lr1.states.map((state) => {
+                  const isSelected = expandedState === state.id;
+                  const trans = automata.lr1.transitions.filter(t => t.from === state.id);
+                  return (
+                    <div
+                      key={state.id}
+                      onClick={() => setExpandedState(prev => prev === state.id ? null : state.id)}
+                      className={`rounded border p-2.5 cursor-pointer transition-all ${
+                        isSelected
+                          ? "border-purple-400/50 bg-purple-400/5"
+                          : "border-zinc-800 hover:border-zinc-700 bg-zinc-900"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-xs font-bold ${
+                          state.is_start ? "text-green-400" : state.is_accept ? "text-yellow-400" : "text-purple-400"
+                        }`}>{state.label}</span>
+                        {state.is_start  && <span className="text-[10px] text-green-600 border border-green-900 rounded px-1">inicio</span>}
+                        {state.is_accept && <span className="text-[10px] text-yellow-600 border border-yellow-900 rounded px-1">accept</span>}
+                        <span className="text-[10px] text-zinc-600 ml-auto">{state.items.length} items</span>
+                        <span className="text-[10px] text-zinc-600">{isSelected ? "▲" : "▼"}</span>
+                      </div>
+                      {trans.length > 0 && (
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mb-1">
+                          {trans.map((t, i) => (
+                            <span key={i} className="text-[10px] font-mono">
+                              <span className="text-yellow-400">{t.symbol}</span>
+                              <span className="text-zinc-600">→</span>
+                              <span className="text-purple-400">
+                                {automata.lr1.states.find(s => s.id === t.to)?.label ?? t.to}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {isSelected && (
+                        <div className="mt-2 pt-2 border-t border-zinc-800 flex flex-col gap-0.5">
+                          {state.items.map((item, i) => {
+                            // Separar la parte del item del lookahead para colorear
+                            const commaIdx = item.label.lastIndexOf(",");
+                            const itemPart = commaIdx >= 0 ? item.label.slice(0, commaIdx) : item.label;
+                            const laPart   = commaIdx >= 0 ? item.label.slice(commaIdx) : "";
+                            return (
+                              <div key={i} className="text-[10px] font-mono leading-relaxed">
+                                <span className={item.completed ? "text-yellow-300" : "text-zinc-300"}>
+                                  {itemPart}
+                                </span>
+                                <span className="text-orange-400">{laPart}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex gap-3 text-[10px] text-zinc-600 shrink-0 pt-1">
+                <span><span className="text-zinc-300">■</span> Item</span>
+                <span><span className="text-yellow-300">■</span> Reducción</span>
+                <span><span className="text-orange-400">■</span> Lookahead</span>
+              </div>
+            </>
+          )}
+
+          {/* ── LALR(1) ── */}
+          {view === "lalr1" && automata.lalr1 && (
+            <>
+              <p className="text-[10px] text-zinc-500 uppercase tracking-widest shrink-0">
+                Estados LALR(1) — {automata.lalr1.states.length} estados
+              </p>
+              <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
+                {automata.lalr1.states.map((state) => {
+                  const isSelected = expandedState === state.id;
+                  const trans = automata.lalr1.transitions.filter(t => t.from === state.id);
+                  return (
+                    <div
+                      key={state.id}
+                      onClick={() => setExpandedState(prev => prev === state.id ? null : state.id)}
+                      className={`rounded border p-2.5 cursor-pointer transition-all ${
+                        isSelected
+                          ? "border-purple-400/50 bg-purple-400/5"
+                          : "border-zinc-800 hover:border-zinc-700 bg-zinc-900"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-xs font-bold ${
+                          state.is_start ? "text-green-400" : state.is_accept ? "text-yellow-400" : "text-purple-400"
+                        }`}>{state.label}</span>
+                        {state.is_start  && <span className="text-[10px] text-green-600 border border-green-900 rounded px-1">inicio</span>}
+                        {state.is_accept && <span className="text-[10px] text-yellow-600 border border-yellow-900 rounded px-1">accept</span>}
+                        {/* Mostrar qué estados LR(1) se fusionaron */}
+                        {state.lr1_ids && state.lr1_ids.length > 1 && (
+                          <span className="text-[10px] text-zinc-600 border border-zinc-800 rounded px-1">
+                            fusiona {state.lr1_ids.length}
+                          </span>
+                        )}
+                        <span className="text-[10px] text-zinc-600 ml-auto">{isSelected ? "▲" : "▼"}</span>
+                      </div>
+                      {/* Transiciones */}
+                      {trans.length > 0 && (
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mb-1">
+                          {trans.map((t, i) => (
+                            <span key={i} className="text-[10px] font-mono">
+                              <span className="text-yellow-400">{t.symbol}</span>
+                              <span className="text-zinc-600">→</span>
+                              <span className="text-purple-400">
+                                {automata.lalr1.states.find(s => s.id === t.to)?.label ?? t.to}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {/* Detalle expandido */}
+                      {isSelected && (
+                        <div className="mt-2 pt-2 border-t border-zinc-800 flex flex-col gap-1">
+                          {/* LR(1) ids fusionados */}
+                          {state.lr1_ids && (
+                            <div className="text-[10px] text-zinc-600 mb-1">
+                              Fusiona: <span className="text-zinc-500">{state.lr1_ids.join(", ")}</span>
+                            </div>
+                          )}
+                          {state.items.map((item, i) => {
+                            // Separar cuerpo del item de los lookaheads fusionados
+                            const commaIdx = item.label.lastIndexOf(",");
+                            const itemPart = commaIdx >= 0 ? item.label.slice(0, commaIdx) : item.label;
+                            const laPart   = commaIdx >= 0 ? item.label.slice(commaIdx) : "";
+                            return (
+                              <div key={i} className="text-[10px] font-mono leading-relaxed">
+                                <span className={item.completed ? "text-yellow-300" : "text-zinc-300"}>
+                                  {itemPart}
+                                </span>
+                                <span className="text-orange-400">{laPart}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex gap-3 text-[10px] text-zinc-600 shrink-0 pt-1">
+                <span><span className="text-zinc-300">■</span> Item</span>
+                <span><span className="text-yellow-300">■</span> Reducción</span>
+                <span><span className="text-orange-400">■</span> Lookaheads</span>
+              </div>
+            </>
+          )}
+
         </div>
       </div>
     </div>
@@ -936,7 +1296,6 @@ function StaticAutomataGraph({ data }: { data: { nodes: GraphNode[]; links: Grap
 
   const NW = 92, NH = 58;
 
-  // BFS layout — sin D3
   const layout = useMemo(() => {
     const { nodes, links } = data;
     const adj: Record<string, string[]> = {};
