@@ -30,11 +30,12 @@ interface RDApiResponse {
   result: RDParseResult;
 }
 
-interface SLRParseStep {
+// Renombrado a LRParseStep (aplica a LR0, SLR1, LALR1, LR1)
+interface LRParseStep {
   step_number: number;
-  action: "shift" | "reduce" | "accept" | "error";
+  action: "shift" | "reduce" | "accept" | "error" | "match" | "predict"; // Añadidos match y predict
   description: string;
-  stack: number[];
+  stack: (number | string)[]; 
   remaining_input: string[];
   production_used?: string;
 }
@@ -50,9 +51,10 @@ interface GotoTable {
   rows: Record<string, string>[];
 }
 
-interface SLRParseResult {
+// Renombrado a LRParseResult
+interface LRParseResult {
   is_valid: boolean;
-  steps: SLRParseStep[];
+  steps: LRParseStep[];
   action_table: ActionTable;
   goto_table: GotoTable;
   first: Record<string, string[]>;
@@ -64,10 +66,11 @@ interface SLRParseResult {
   total_tokens: number;
 }
 
-interface SLRApiResponse {
+// Renombrado a LRApiResponse
+interface LRApiResponse {
   method: string;
   grammar: GrammarInfo;
-  result: SLRParseResult;
+  result: LRParseResult;
 }
 
 interface NFAState {
@@ -162,7 +165,6 @@ interface LALR1Automata {
   accept_states: string[];
 }
 
-// Nodo del AFN LR(1): cada Item1 individual es un nodo
 interface LR1NFAState {
   id: string;
   label: string;
@@ -248,7 +250,8 @@ T -> F T2
 T2 -> * F T2 | ε
 F -> ( E ) | id`;
 
-const DEFAULT_GRAMMAR_SLR = `E -> E + T | T
+// Renombrado a DEFAULT_GRAMMAR_LR
+const DEFAULT_GRAMMAR_LR = `E -> E + T | T
 T -> T * F | F
 F -> ( E ) | id`;
 
@@ -272,18 +275,22 @@ const RD_STEP_ICONS: Record<string, string> = {
   error:   "✗",
 };
 
-const SLR_STEP_COLORS: Record<string, string> = {
+const LR_STEP_COLORS: Record<string, string> = {
   shift:  "text-cyan-400",
   reduce: "text-yellow-400",
   accept: "text-green-300",
   error:  "text-red-400",
+  match:  "text-green-400",  // Color para LL(1)
+  predict:"text-purple-400", // Color para LL(1)
 };
 
-const SLR_STEP_ICONS: Record<string, string> = {
+const LR_STEP_ICONS: Record<string, string> = {
   shift:  "⇒",
   reduce: "↩",
   accept: "★",
   error:  "✗",
+  match:  "✓", // Ícono para LL(1)
+  predict:"→", // Ícono para LL(1)
 };
 
 const AUTOMATA_VIEW_LABELS: Record<AutomataView, string> = {
@@ -301,7 +308,10 @@ export default function App() {
   const [grammarText, setGrammarText] = useState(DEFAULT_GRAMMAR);
   const [inputString, setInputString] = useState(DEFAULT_INPUT);
   const [rdResponse, setRdResponse]   = useState<RDApiResponse | null>(null);
-  const [slrResponse, setSlrResponse] = useState<SLRApiResponse | null>(null);
+  
+  // Modificado a lrResponse
+  const [lrResponse, setLrResponse]   = useState<LRApiResponse | null>(null);
+  
   const [automata, setAutomata]       = useState<AutomataResponse | null>(null);
   const [loading, setLoading]         = useState(false);
   const [automataLoading, setAutomataLoading] = useState(false);
@@ -309,16 +319,19 @@ export default function App() {
   const [activeTab, setActiveTab]     = useState<"steps" | "table" | "tree" | "grammar" | "automata">("steps");
   const [automataView, setAutomataView] = useState<AutomataView>("afd");
 
+  // Nueva validación para cubrir toda la familia LR
+  const isLR = ["ll1", "lr0", "slr1", "lalr1", "lr1"].includes(method);
+
   const handleMethodChange = (m: ParserMethod) => {
     setMethod(m);
     setRdResponse(null);
-    setSlrResponse(null);
+    setLrResponse(null);
     setAutomata(null);
     setError(null);
     if (m === "recursive-descent" || m === "ll1") {
       setGrammarText(DEFAULT_GRAMMAR);
     } else {
-      setGrammarText(DEFAULT_GRAMMAR_SLR);
+      setGrammarText(DEFAULT_GRAMMAR_LR);
     }
     setActiveTab("steps");
   };
@@ -327,7 +340,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     setRdResponse(null);
-    setSlrResponse(null);
+    setLrResponse(null);
     try {
       const res = await fetch(`http://localhost:8000/parse/${method}`, {
         method: "POST",
@@ -339,8 +352,12 @@ export default function App() {
         throw new Error(data.detail ?? "Error del servidor");
       }
       const data = await res.json();
-      if (method === "slr1") setSlrResponse(data as SLRApiResponse);
-      else setRdResponse(data as RDApiResponse);
+      
+      if (["ll1", "lr0", "slr1", "lalr1", "lr1"].includes(method)) {
+        setLrResponse(data as LRApiResponse);
+      } else {
+        setRdResponse(data as RDApiResponse);
+      }
       setActiveTab("steps");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Error desconocido");
@@ -353,7 +370,6 @@ export default function App() {
     setAutomataLoading(true);
     setError(null);
     try {
-      // Usa el endpoint unificado que devuelve afn, afd, lr1 y lalr1
       const res = await fetch("http://localhost:8000/grammar/automata/all", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -374,15 +390,14 @@ export default function App() {
     }
   }
 
-  const isSLR          = method === "slr1";
-  const currentResult  = isSLR ? slrResponse?.result  : rdResponse?.result;
-  const currentGrammar = isSLR ? slrResponse?.grammar : rdResponse?.grammar;
-  const hasResponse    = isSLR ? !!slrResponse : !!rdResponse;
+  const currentResult  = isLR ? lrResponse?.result  : rdResponse?.result;
+  const currentGrammar = isLR ? lrResponse?.grammar : rdResponse?.grammar;
+  const hasResponse    = isLR ? !!lrResponse : !!rdResponse;
 
   const tabs = [
     { id: "steps"    as const, label: "Pasos",      show: hasResponse },
-    { id: "table"    as const, label: "Tabla",       show: hasResponse && isSLR },
-    { id: "tree"     as const, label: "Árbol",       show: hasResponse && !isSLR },
+    { id: "table"    as const, label: "Tabla",       show: hasResponse && isLR },
+    { id: "tree"     as const, label: "Árbol",       show: hasResponse && !isLR },
     { id: "grammar"  as const, label: "Gramática",   show: hasResponse },
     { id: "automata" as const, label: "Autómata LR", show: !!automata },
   ].filter(t => t.show);
@@ -486,12 +501,14 @@ export default function App() {
             </div>
           )}
 
-          {slrResponse?.result.conflicts && slrResponse.result.conflicts.length > 0 && (
-            <div className="mx-6 mt-4 p-3 bg-yellow-950/50 border border-yellow-800 rounded text-yellow-400 text-xs">
-              ⚠ Conflictos detectados:
-              {slrResponse.result.conflicts.map((c, i) => (
-                <div key={i} className="mt-1 text-yellow-500">{c}</div>
-              ))}
+          {lrResponse?.result.conflicts && lrResponse.result.conflicts.length > 0 && (
+            <div className="mx-6 mt-4 p-3 bg-yellow-950/50 border border-yellow-800 rounded text-yellow-400 text-xs flex flex-col gap-1">
+              <strong>⚠ Conflictos detectados en {method.toUpperCase()}:</strong>
+              <div className="max-h-24 overflow-y-auto">
+                {lrResponse.result.conflicts.map((c, i) => (
+                  <div key={i} className="text-yellow-500">{c}</div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -543,7 +560,7 @@ export default function App() {
 
               <div className="flex-1 overflow-y-auto rounded border border-zinc-800 bg-zinc-900">
 
-                {activeTab === "steps" && !isSLR && rdResponse && (
+                {activeTab === "steps" && !isLR && rdResponse && (
                   <table className="w-full text-xs">
                     <thead className="sticky top-0 bg-zinc-800 text-zinc-400">
                       <tr>
@@ -570,7 +587,7 @@ export default function App() {
                   </table>
                 )}
 
-                {activeTab === "steps" && isSLR && slrResponse && (
+                {activeTab === "steps" && isLR && lrResponse && (
                   <table className="w-full text-xs">
                     <thead className="sticky top-0 bg-zinc-800 text-zinc-400">
                       <tr>
@@ -583,24 +600,34 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {slrResponse.result.steps.map((step) => (
-                        <tr key={step.step_number} className="border-t border-zinc-800 hover:bg-zinc-800/50">
-                          <td className="px-3 py-2 text-zinc-600">{step.step_number}</td>
-                          <td className={`px-3 py-2 font-bold ${SLR_STEP_COLORS[step.action] ?? "text-zinc-400"}`}>
-                            {SLR_STEP_ICONS[step.action]} {step.action}
-                          </td>
-                          <td className="px-3 py-2 text-cyan-400 font-mono">[{step.stack.join(" ")}]</td>
-                          <td className="px-3 py-2 text-zinc-300">{step.description}</td>
-                          <td className="px-3 py-2 text-zinc-500">{step.remaining_input.join(" ") || "—"}</td>
-                          <td className="px-3 py-2 text-yellow-400 text-xs">{step.production_used ?? ""}</td>
-                        </tr>
-                      ))}
+                      {lrResponse.result.steps.length === 0 ? (
+                         <tr>
+                            <td colSpan={6} className="px-3 py-6 text-center text-zinc-600">
+                               No hay pasos disponibles / Implementación sin trazabilidad del stack
+                            </td>
+                         </tr>
+                      ) : (
+                        lrResponse.result.steps.map((step) => (
+                          <tr key={step.step_number} className="border-t border-zinc-800 hover:bg-zinc-800/50">
+                            <td className="px-3 py-2 text-zinc-600">{step.step_number}</td>
+                            <td className={`px-3 py-2 font-bold ${LR_STEP_COLORS[step.action] ?? "text-zinc-400"}`}>
+                              {LR_STEP_ICONS[step.action]} {step.action}
+                            </td>
+                            <td className={`px-3 py-2 font-mono ${method === "ll1" ? "text-purple-400" : "text-cyan-400"}`}>
+                              [{step.stack.join(" ")}]
+                            </td>
+                            <td className="px-3 py-2 text-zinc-300">{step.description}</td>
+                            <td className="px-3 py-2 text-zinc-500">{step.remaining_input.join(" ") || "—"}</td>
+                            <td className="px-3 py-2 text-yellow-400 text-xs">{step.production_used ?? ""}</td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 )}
 
-                {activeTab === "table" && slrResponse && (
-                  <SLRTableView result={slrResponse.result} />
+                {activeTab === "table" && lrResponse && (
+                  <LRTableView result={lrResponse.result} />
                 )}
 
                 {activeTab === "tree" && rdResponse && (
@@ -616,7 +643,7 @@ export default function App() {
                   <GrammarView
                     grammar={currentGrammar}
                     generatedFunctions={rdResponse?.generated_functions}
-                    slrResult={isSLR ? slrResponse?.result : undefined}
+                    lrResult={isLR ? lrResponse?.result : undefined}
                   />
                 )}
 
@@ -636,9 +663,9 @@ export default function App() {
   );
 }
 
-// ─── SLR Table View ───────────────────────────────────────────────────────────
+// ─── LR Table View ───────────────────────────────────────────────────────────
 
-function SLRTableView({ result }: { result: SLRParseResult }) {
+function LRTableView({ result }: { result: LRParseResult }) {
   const { action_table, goto_table } = result;
   const terms    = action_table.terminals;
   const nonterms = goto_table.nonterminals;
@@ -648,6 +675,7 @@ function SLRTableView({ result }: { result: SLRParseResult }) {
     if (val === "acc") return "text-green-400 font-bold";
     if (val.startsWith("s")) return "text-cyan-400";
     if (val.startsWith("r")) return "text-yellow-400";
+    if (val.includes("→")) return "text-purple-300"; // <--- Añade esta línea para LL(1)
     if (val.includes("/")) return "text-red-400 font-bold";
     return "text-zinc-300";
   }
@@ -669,7 +697,7 @@ function SLRTableView({ result }: { result: SLRParseResult }) {
 
       <div className="overflow-x-auto">
         <table className="text-xs border-collapse">
-          <thead className="sticky top-0 bg-zinc-800">
+          <thead className="sticky top-0 bg-zinc-800 z-10">
             <tr>
               <th className="px-3 py-2 text-zinc-400 border border-zinc-700 text-left" rowSpan={2}>Estado</th>
               <th className="px-3 py-2 text-cyan-400 border border-zinc-700 text-center" colSpan={terms.length}>ACTION</th>
@@ -739,14 +767,14 @@ function SLRTableView({ result }: { result: SLRParseResult }) {
 function GrammarView({
   grammar,
   generatedFunctions,
-  slrResult,
+  lrResult,
 }: {
   grammar: GrammarInfo;
   generatedFunctions?: { function_name: string; cases: { production: string; triggered_by_tokens: string[] }[] }[];
-  slrResult?: SLRParseResult;
+  lrResult?: LRParseResult;
 }) {
-  const first  = slrResult?.first  ?? grammar.first;
-  const follow = slrResult?.follow ?? grammar.follow;
+  const first  = lrResult?.first  ?? grammar.first;
+  const follow = lrResult?.follow ?? grammar.follow;
 
   return (
     <div className="p-4 grid grid-cols-2 gap-6">
@@ -895,13 +923,11 @@ function AutomataView({
     };
   })();
 
-  // ── Contadores para el subtitle ────────────────────────────────────────────
   const statCount = graphData.nodes.length;
   const transCount = graphData.links.length;
 
   return (
     <div className="p-4 flex flex-col gap-3">
-
       {/* Toggle de vistas */}
       <div className="flex items-center gap-3">
         <div className="flex gap-1">
@@ -931,9 +957,7 @@ function AutomataView({
         </span>
       </div>
 
-      {/* Cuerpo principal */}
       <div className="flex gap-3" style={{ height: 520 }}>
-
         {/* Grafo SVG */}
         <div className="rounded border border-zinc-800 bg-zinc-950 overflow-hidden" style={{ flex: "0 0 63%" }}>
           <StaticAutomataGraph key={view} data={graphData} />
@@ -941,7 +965,6 @@ function AutomataView({
 
         {/* Panel lateral */}
         <div className="flex flex-col flex-1 gap-2 overflow-hidden">
-
           {/* ── LR(0) DFA ── */}
           {view === "afd" && (
             <>
@@ -1167,7 +1190,6 @@ function AutomataView({
                       {isSelected && (
                         <div className="mt-2 pt-2 border-t border-zinc-800 flex flex-col gap-0.5">
                           {state.items.map((item, i) => {
-                            // Separar la parte del item del lookahead para colorear
                             const commaIdx = item.label.lastIndexOf(",");
                             const itemPart = commaIdx >= 0 ? item.label.slice(0, commaIdx) : item.label;
                             const laPart   = commaIdx >= 0 ? item.label.slice(commaIdx) : "";
@@ -1220,7 +1242,6 @@ function AutomataView({
                         }`}>{state.label}</span>
                         {state.is_start  && <span className="text-[10px] text-green-600 border border-green-900 rounded px-1">inicio</span>}
                         {state.is_accept && <span className="text-[10px] text-yellow-600 border border-yellow-900 rounded px-1">accept</span>}
-                        {/* Mostrar qué estados LR(1) se fusionaron */}
                         {state.lr1_ids && state.lr1_ids.length > 1 && (
                           <span className="text-[10px] text-zinc-600 border border-zinc-800 rounded px-1">
                             fusiona {state.lr1_ids.length}
@@ -1228,7 +1249,6 @@ function AutomataView({
                         )}
                         <span className="text-[10px] text-zinc-600 ml-auto">{isSelected ? "▲" : "▼"}</span>
                       </div>
-                      {/* Transiciones */}
                       {trans.length > 0 && (
                         <div className="flex flex-wrap gap-x-3 gap-y-0.5 mb-1">
                           {trans.map((t, i) => (
@@ -1242,17 +1262,14 @@ function AutomataView({
                           ))}
                         </div>
                       )}
-                      {/* Detalle expandido */}
                       {isSelected && (
                         <div className="mt-2 pt-2 border-t border-zinc-800 flex flex-col gap-1">
-                          {/* LR(1) ids fusionados */}
                           {state.lr1_ids && (
                             <div className="text-[10px] text-zinc-600 mb-1">
                               Fusiona: <span className="text-zinc-500">{state.lr1_ids.join(", ")}</span>
                             </div>
                           )}
                           {state.items.map((item, i) => {
-                            // Separar cuerpo del item de los lookaheads fusionados
                             const commaIdx = item.label.lastIndexOf(",");
                             const itemPart = commaIdx >= 0 ? item.label.slice(0, commaIdx) : item.label;
                             const laPart   = commaIdx >= 0 ? item.label.slice(commaIdx) : "";
