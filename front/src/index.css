@@ -1,0 +1,291 @@
+  /* ─── Fonts ────────────────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,700;1,400&display=swap');
+
+/* ─── Reset & Base ─────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  /* Colors */
+  --bg-base:       #09090b;
+  --bg-surface:    #111113;
+  --bg-elevated:   #18181b;
+  --bg-muted:      #27272a;
+
+  --border:        #27272a;
+  --border-bright: #3f3f46;
+
+  --text-primary:  #f4f4f5;
+  --text-secondary:#a1a1aa;
+  --text-muted:    #52525b;
+
+  --green:         #4ade80;
+  --green-dim:     rgba(74, 222, 128, 0.12);
+  --green-border:  rgba(74, 222, 128, 0.35);
+
+  --cyan:          #22d3ee;
+  --yellow:        #facc15;
+  --purple:        #c084fc;
+  --red:           #f87171;
+  --red-dim:       rgba(248, 113, 113, 0.08);
+
+  /* Typography */
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+  /* Scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-bright) transparent;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── Scrollbar ─────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: var(--border-bright); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #52525b; }
+
+/* ─── Selection ─────────────────────────────────────────────────────────────── */
+::selection {
+  background: rgba(74, 222, 128, 0.2);
+  color: var(--green);
+}
+
+/* ─── Cursor blink (terminal feel) ─────────────────────────────────────────── */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+.cursor::after {
+  content: '█';
+  color: var(--green);
+  animation: blink 1s step-end infinite;
+  margin-left: 2px;
+}
+
+/* ─── Scan line overlay (subtle CRT effect) ─────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ─── Header glow ───────────────────────────────────────────────────────────── */
+header {
+  background: var(--bg-surface);
+  box-shadow: 0 1px 0 var(--border), 0 4px 24px rgba(0,0,0,0.4);
+  position: relative;
+}
+
+header::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    var(--green-border) 30%,
+    var(--green-border) 70%,
+    transparent 100%
+  );
+}
+
+/* ─── Sidebar ───────────────────────────────────────────────────────────────── */
+aside {
+  background: var(--bg-surface);
+}
+
+/* ─── Textareas & inputs ────────────────────────────────────────────────────── */
+textarea, input[type="text"], input:not([type]) {
+  font-family: var(--font-mono) !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+textarea:focus, input:focus {
+  box-shadow: 0 0 0 1px var(--green-border), 0 0 12px rgba(74,222,128,0.06);
+}
+
+/* ─── Table ──────────────────────────────────────────────────────────────────── */
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+thead th {
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+tbody tr {
+  transition: background 0.1s ease;
+}
+
+/* Highlight matching rows on hover */
+tbody tr:hover td {
+  background: rgba(255,255,255,0.02);
+}
+
+/* Step action badges */
+tbody tr[data-action="success"] {
+  background: rgba(74, 222, 128, 0.04);
+}
+tbody tr[data-action="error"] {
+  background: rgba(248, 113, 113, 0.04);
+}
+
+/* ─── Buttons ───────────────────────────────────────────────────────────────── */
+button {
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* Parse button pulse on hover */
+button.parse-btn:not(:disabled):hover {
+  box-shadow: 0 0 16px rgba(74, 222, 128, 0.2);
+}
+
+button.parse-btn:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+/* ─── Tree viewer ───────────────────────────────────────────────────────────── */
+.tree-node {
+  position: relative;
+}
+
+.tree-node::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+
+/* ─── Animations ────────────────────────────────────────────────────────────── */
+
+/* Fade in result panel */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.result-panel {
+  animation: fadeUp 0.2s ease forwards;
+}
+
+/* Step rows stagger */
+@keyframes rowIn {
+  from { opacity: 0; transform: translateX(-4px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+tbody tr {
+  animation: rowIn 0.12s ease both;
+}
+
+tbody tr:nth-child(1)  { animation-delay: 0.00s; }
+tbody tr:nth-child(2)  { animation-delay: 0.02s; }
+tbody tr:nth-child(3)  { animation-delay: 0.04s; }
+tbody tr:nth-child(4)  { animation-delay: 0.06s; }
+tbody tr:nth-child(5)  { animation-delay: 0.08s; }
+tbody tr:nth-child(6)  { animation-delay: 0.10s; }
+tbody tr:nth-child(7)  { animation-delay: 0.12s; }
+tbody tr:nth-child(8)  { animation-delay: 0.14s; }
+tbody tr:nth-child(9)  { animation-delay: 0.16s; }
+tbody tr:nth-child(10) { animation-delay: 0.18s; }
+
+/* Loading spinner */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--border-bright);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+/* Badge pulse for valid result */
+@keyframes validPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.4); }
+  70%  { box-shadow: 0 0 0 6px rgba(74, 222, 128, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+}
+
+.badge-valid {
+  animation: validPulse 1s ease-out;
+}
+
+/* ─── Grammar tab ───────────────────────────────────────────────────────────── */
+.grammar-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  transition: border-color 0.15s ease;
+}
+
+.grammar-card:hover {
+  border-color: var(--border-bright);
+}
+
+/* ─── Noise texture on sidebar ──────────────────────────────────────────────── */
+aside::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+/* ─── Utility: glow text ────────────────────────────────────────────────────── */
+.glow-green {
+  text-shadow: 0 0 8px rgba(74, 222, 128, 0.6);
+}
+
+.glow-cyan {
+  text-shadow: 0 0 8px rgba(34, 211, 238, 0.5);
+}

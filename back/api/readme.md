@@ -1,1 +1,0 @@
-# en esta carpeta irian los crud del backend
