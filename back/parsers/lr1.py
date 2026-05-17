@@ -7,7 +7,10 @@ from __future__ import annotations
 from typing import Dict, List, Tuple, Set, FrozenSet, Any
 
 from grammar.grammar import Grammar, EPSILON
-from parsers.descenso_recursivo import ParseResult, ParseNode
+from parsers.descenso_recursivo import ParseResult as RDParseResult, ParseNode
+from dataclasses import dataclass, field
+from collections import defaultdict
+from typing import Optional
 
 
 class LR1Item:
@@ -53,6 +56,7 @@ class LR1Parser:
         self._build_automaton()
         self.action: Dict[Tuple[int, str], Tuple[str, Any]] = {}
         self.goto: Dict[Tuple[int, str], int] = {}
+        self.conflicts: list = []
         self._build_parsing_table()
 
     def _build_augmented(self):
@@ -81,7 +85,8 @@ class LR1Parser:
                 if symbol not in self.aug_productions:
                     continue
                 tail = list(body[dot + 1 :])
-                for la in lookahead:
+                # iterate over a snapshot to avoid "set changed size" errors
+                for la in list(lookahead):
                     first = self.grammar._first_of_sequence(tail + [la])
                     for prod in self.aug_productions[symbol]:
                         prod = self._normalize_body(prod)
@@ -135,8 +140,9 @@ class LR1Parser:
                         j = self.transitions[(i, a)]
                         key = (i, a)
                         if key in self.action and self.action[key] != ("shift", j):
-                            raise ValueError(f"Conflicto ACTION en estado {i} sobre '{a}'")
-                        self.action[key] = ("shift", j)
+                            self.conflicts.append(f"Conflicto ACTION en estado {i} sobre '{a}': {self.action[key]} vs ('shift',{j})")
+                        else:
+                            self.action[key] = ("shift", j)
                 else:
                     if it.head == self.augmented_start:
                         for t in it.lookahead:
@@ -144,15 +150,17 @@ class LR1Parser:
                                 raise ValueError(f"Símbolo de lookahead inválido en aceptación: {t}")
                             key = (i, "$" )
                             if key in self.action and self.action[key] != ("accept", 0):
-                                raise ValueError(f"Conflicto ACTION en estado {i} sobre '$'")
-                            self.action[key] = ("accept", 0)
+                                self.conflicts.append(f"Conflicto ACTION en estado {i} sobre '$': {self.action[key]} vs ('accept',0)")
+                            else:
+                                self.action[key] = ("accept", 0)
                     else:
                         rule_idx = (it.head, tuple(it.body))
                         for t in it.lookahead:
                             key = (i, t)
                             if key in self.action and self.action[key] != ("reduce", rule_idx):
-                                raise ValueError(f"Conflicto reduce en estado {i} sobre '{t}'")
-                            self.action[key] = ("reduce", rule_idx)
+                                self.conflicts.append(f"Conflicto reduce en estado {i} sobre '{t}': {self.action[key]} vs ('reduce',{rule_idx})")
+                            else:
+                                self.action[key] = ("reduce", rule_idx)
 
             for (s, sym), j in self.transitions.items():
                 if s == i and sym in self.aug_productions:
@@ -170,7 +178,7 @@ class LR1Parser:
             "goto": {f"{s},{A}": j for (s, A), j in self.goto.items()},
         }
 
-    def parse(self, input_string: str) -> ParseResult:
+    def parse(self, input_string: str) -> RDParseResult:
         tokens = input_string.strip().split()
         if not tokens:
             return ParseResult(False, None, [], "La cadena de entrada está vacía.", 0, 0)
@@ -211,9 +219,106 @@ class LR1Parser:
                     state_stack.append(goto_state)
                 elif kind == "accept":
                     root = node_stack[0].to_dict() if node_stack else None
-                    return ParseResult(True, root, [], None, pos, len(tokens) - 1)
+                    return self._make_result(
+                        is_valid=True,
+                        steps=[],
+                        error_message=None,
+                        tokens_consumed=pos,
+                        total_tokens=len(tokens) - 1,
+                    )
                 else:
                     raise ValueError(f"Acción desconocida: {kind}")
 
         except Exception as e:
-            return ParseResult(False, None, [], str(e), pos, len(tokens) - 1)
+            return self._make_result(
+                is_valid=False,
+                steps=[],
+                error_message=str(e),
+                tokens_consumed=pos,
+                total_tokens=len(tokens) - 1,
+            )
+
+    # Result formatting similar to SLR1Parser
+    def _format_tables(self) -> tuple[dict, dict]:
+        prods_list = []
+        for lhs, rhss in self.aug_productions.items():
+            for rhs in rhss:
+                prods_list.append((lhs, rhs))
+
+        num_states = len(self.states)
+        terminals = sorted(set(self.grammar.terminals) | {"$"})
+        nonterminals = list(self.grammar.productions.keys())
+
+        action_rows = []
+        for i in range(num_states):
+            row = {"state": i}
+            for t in terminals:
+                a = self.action.get((i, t))
+                if not a:
+                    row[t] = ""
+                else:
+                    kind, val = a
+                    if kind == "shift":
+                        row[t] = f"s{val}"
+                    elif kind == "accept":
+                        row[t] = "acc"
+                    elif kind == "reduce":
+                        lhs, rhs = val
+                        # find index
+                        idx = next((idx for idx, (L, R) in enumerate(prods_list) if L == lhs and tuple(R) == rhs), None)
+                        row[t] = f"r{idx}" if idx is not None else ""
+                    else:
+                        row[t] = ""
+            action_rows.append(row)
+
+        productions_legend = [
+            {"index": idx, "production": f"{lhs} → {' '.join(rhs) if rhs else EPSILON}"}
+            for idx, (lhs, rhs) in enumerate(prods_list)
+        ]
+
+        action_table = {"terminals": terminals, "rows": action_rows, "productions": productions_legend}
+
+        goto_rows = []
+        for i in range(num_states):
+            row = {"state": i}
+            for nt in nonterminals:
+                g = self.goto.get((i, nt))
+                row[nt] = str(g) if g is not None else ""
+            goto_rows.append(row)
+
+        goto_table = {"nonterminals": nonterminals, "rows": goto_rows}
+        return action_table, goto_table
+
+    def _states_repr(self) -> list[dict]:
+        result = []
+        for i, state in enumerate(self.states):
+            result.append({
+                "id": i,
+                "items": [repr(item) for item in sorted(state, key=repr)],
+                "transitions": {sym: dst for (src, sym), dst in self.transitions.items() if src == i},
+            })
+        return result
+
+    def _make_result(self, *, is_valid: bool, steps: list, error_message: Optional[str], tokens_consumed: int, total_tokens: int) -> dict:
+        action_table, goto_table = self._format_tables()
+        first = {
+            nt: sorted(v - {EPSILON}) + (["ε"] if EPSILON in v else [])
+            for nt, v in self.grammar._first.items()
+        }
+        follow = {
+            nt: sorted(v - {"$"}) + (["$"] if "$" in v else [])
+            for nt, v in self.grammar._follow.items()
+        }
+        return {
+            "is_valid": is_valid,
+            "steps": steps,
+            "action_table": action_table,
+            "goto_table": goto_table,
+            "first": first,
+            "follow": follow,
+            "states": self._states_repr(),
+            "conflicts": self.conflicts,
+            "error_message": error_message,
+            "tokens_consumed": tokens_consumed,
+            "total_tokens": total_tokens,
+        }

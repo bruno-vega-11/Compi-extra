@@ -14,7 +14,10 @@ from __future__ import annotations
 from typing import Dict, List, Tuple, Set, FrozenSet, Any
 
 from grammar.grammar import Grammar, EPSILON
-from parsers.descenso_recursivo import ParseResult, ParseNode
+from parsers.descenso_recursivo import ParseResult as RDParseResult, ParseNode
+from dataclasses import dataclass, field
+from collections import defaultdict
+from typing import Optional
 
 
 class Item:
@@ -124,6 +127,7 @@ class LR0Parser:
         self.transitions = transitions
 
     def _build_parsing_table(self):
+        self.conflicts = []
         for i, state in enumerate(self.states):
             for it in state:
                 if not it.is_complete():
@@ -133,16 +137,18 @@ class LR0Parser:
                         j = self.transitions[(i, a)]
                         key = (i, a)
                         if key in self.action and self.action[key] != ("shift", j):
-                            raise ValueError(f"Conflicto ACTION en estado {i} sobre '{a}'")
-                        self.action[key] = ("shift", j)
+                            self.conflicts.append(f"Conflicto ACTION en estado {i} sobre '{a}': {self.action[key]} vs ('shift',{j})")
+                        else:
+                            self.action[key] = ("shift", j)
                 else:
                     # reduce (no para S')
                     if it.head == self.augmented_start:
                         # Aceptar en $
                         key = (i, "$")
                         if key in self.action and self.action[key] != ("accept", 0):
-                            raise ValueError(f"Conflicto ACTION en estado {i} sobre '$'")
-                        self.action[key] = ("accept", 0)
+                            self.conflicts.append(f"Conflicto ACTION en estado {i} sobre '$': {self.action[key]} vs ('accept',0)")
+                        else:
+                            self.action[key] = ("accept", 0)
                     else:
                         # Para LR(0) puro aplicamos reducción en TODOS los símbolos terminales
                         prod_len = len(it.body)
@@ -150,8 +156,9 @@ class LR0Parser:
                             key = (i, t)
                             rule_idx = (it.head, tuple(it.body))
                             if key in self.action and self.action[key] != ("reduce", rule_idx):
-                                raise ValueError(f"Conflicto reduce en estado {i} sobre '{t}'")
-                            self.action[key] = ("reduce", rule_idx)
+                                self.conflicts.append(f"Conflicto reduce en estado {i} sobre '{t}': {self.action[key]} vs ('reduce',{rule_idx})")
+                            else:
+                                self.action[key] = ("reduce", rule_idx)
 
             # llenar GOTO desde transiciones para no terminales
             for (s, sym), j in self.transitions.items():
@@ -172,7 +179,7 @@ class LR0Parser:
             "goto": {f"{s},{A}": j for (s, A), j in self.goto.items()},
         }
 
-    def parse(self, input_string: str) -> ParseResult:
+    def parse(self, input_string: str) -> RDParseResult:
         tokens = input_string.strip().split()
         if not tokens:
             return ParseResult(False, None, [], "La cadena de entrada está vacía.", 0, 0)
@@ -218,9 +225,98 @@ class LR0Parser:
                         root = node_stack[0].to_dict() if node_stack else None
                     else:
                         root = node_stack[0].to_dict()
-                    return ParseResult(True, root, [], None, pos, len(tokens) - 1)
+                    return self._make_result(
+                        is_valid=True,
+                        steps=[],
+                        error_message=None,
+                        tokens_consumed=pos,
+                        total_tokens=len(tokens) - 1,
+                    )
                 else:
                     raise ValueError(f"Acción desconocida: {kind}")
 
         except Exception as e:
-            return ParseResult(False, None, [], str(e), pos, len(tokens) - 1)
+            return self._make_result(
+                is_valid=False,
+                steps=[],
+                error_message=str(e),
+                tokens_consumed=pos,
+                total_tokens=len(tokens) - 1,
+            )
+
+    def _format_tables(self) -> tuple[dict, dict]:
+        # build productions list from augmented productions
+        prods_list = []
+        for lhs, rhss in self.aug_productions.items():
+            for rhs in rhss:
+                prods_list.append((lhs, rhs))
+
+        num_states = len(self.states)
+        terminals = sorted(set(self.grammar.terminals) | {"$"})
+        nonterminals = list(self.grammar.productions.keys())
+
+        action_rows = []
+        for i in range(num_states):
+            row = {"state": i}
+            for t in terminals:
+                a = self.action.get((i, t))
+                if not a:
+                    row[t] = ""
+                else:
+                    kind, val = a
+                    if kind == "shift":
+                        row[t] = f"s{val}"
+                    elif kind == "accept":
+                        row[t] = "acc"
+                    elif kind == "reduce":
+                        lhs, rhs = val
+                        idx = next((idx for idx, (L, R) in enumerate(prods_list) if L == lhs and tuple(R) == rhs), None)
+                        row[t] = f"r{idx}" if idx is not None else ""
+                    else:
+                        row[t] = ""
+            action_rows.append(row)
+
+        productions_legend = [
+            {"index": idx, "production": f"{lhs} → {' '.join(rhs) if rhs else EPSILON}"}
+            for idx, (lhs, rhs) in enumerate(prods_list)
+        ]
+
+        action_table = {"terminals": terminals, "rows": action_rows, "productions": productions_legend}
+
+        goto_rows = []
+        for i in range(num_states):
+            row = {"state": i}
+            for nt in nonterminals:
+                g = self.goto.get((i, nt))
+                row[nt] = str(g) if g is not None else ""
+            goto_rows.append(row)
+
+        goto_table = {"nonterminals": nonterminals, "rows": goto_rows}
+        return action_table, goto_table
+
+    def _states_repr(self) -> list[dict]:
+        return [{"id": i, "items": [repr(it) for it in sorted(st, key=repr)], "transitions": {sym: dst for (s, sym), dst in self.transitions.items() if s == i}} for i, st in enumerate(self.states)]
+
+    def _make_result(self, *, is_valid: bool, steps: list, error_message: Optional[str], tokens_consumed: int, total_tokens: int) -> RDParseResult:
+        action_table, goto_table = self._format_tables()
+        first = {
+            nt: sorted(v - {EPSILON}) + (["ε"] if EPSILON in v else [])
+            for nt, v in self.grammar._first.items()
+        }
+        follow = {
+            nt: sorted(v - {"$"}) + (["$"] if "$" in v else [])
+            for nt, v in self.grammar._follow.items()
+        }
+        return {
+            "is_valid": is_valid,
+            "steps": steps,
+            "action_table": action_table,
+            "goto_table": goto_table,
+            "first": first,
+            "follow": follow,
+            "states": self._states_repr(),
+            "conflicts": getattr(self, 'conflicts', []),
+            "error_message": error_message,
+            "tokens_consumed": tokens_consumed,
+            "total_tokens": total_tokens,
+        }
