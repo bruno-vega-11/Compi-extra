@@ -14,6 +14,26 @@ from collections import defaultdict
 from typing import Optional
 
 
+@dataclass
+class ParseStep:
+    step_number: int
+    action: str
+    description: str
+    stack: list
+    remaining_input: list
+    production_used: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "step_number": self.step_number,
+            "action": self.action,
+            "description": self.description,
+            "stack": self.stack,
+            "remaining_input": self.remaining_input,
+            "production_used": self.production_used,
+        }
+
+
 class LR1Item:
     def __init__(self, head: str, body: List[str], dot: int, lookahead: FrozenSet[str]):
         self.head = head
@@ -216,52 +236,114 @@ class LALR1Parser:
         }
 
     def parse(self, input_string: str) -> RDParseResult:
-        tokens = input_string.strip().split()
-        if not tokens:
-            return self._make_result(is_valid=False, steps=[], error_message="La cadena de entrada está vacía.", tokens_consumed=0, total_tokens=0)
+        tokens = input_string.strip().split() if input_string.strip() else []
+        tokens_eof = tokens + ["$"]
 
-        tokens.append("$")
         state_stack: List[int] = [0]
         node_stack: List[ParseNode] = []
         pos = 0
+        steps: List[ParseStep] = []
+        step_n = 0
+        prods_list = self._build_productions_list()
+
+        def add_step(action, description, production=None):
+            nonlocal step_n
+            step_n += 1
+            steps.append(ParseStep(
+                step_number=step_n,
+                action=action,
+                description=description,
+                stack=list(state_stack),
+                remaining_input=list(tokens_eof[pos:]),
+                production_used=production,
+            ))
 
         try:
             while True:
                 state = state_stack[-1]
-                a = tokens[pos] if pos < len(tokens) else "$"
-                action = self.action.get((state, a))
+                token = tokens_eof[pos]
+                action = self.action.get((state, token))
                 if action is None:
-                    raise ValueError(f"Tabla LALR(1): no hay acción para (estado {state}, '{a}').")
+                    add_step(
+                        "error",
+                        f"✗ Token '{token}' inesperado en estado {state}. No existe acción definida."
+                    )
+                    return self._make_result(
+                        is_valid=False,
+                        steps=steps,
+                        error_message=f"Tabla LALR(1): no hay acción para (estado {state}, '{token}').",
+                        tokens_consumed=pos,
+                        total_tokens=len(tokens),
+                    )
 
                 kind, val = action
                 if kind == "shift":
-                    node = ParseNode(symbol=a, is_terminal=True, matched_token=a)
+                    add_step("shift", f"Shift '{token}' → estado {val}.")
+                    node = ParseNode(symbol=token, is_terminal=True, matched_token=token)
                     node_stack.append(node)
                     state_stack.append(val)
                     pos += 1
                 elif kind == "reduce":
                     head, body = val
                     body = list(body)
-                    children = []
-                    for _ in range(len(body)):
-                        if not node_stack:
-                            raise ValueError("Error interno en reducción: pila de nodos vacía.")
-                        children.insert(0, node_stack.pop())
-                        state_stack.pop()
-                    new_node = ParseNode(symbol=head, children=children)
-                    node_stack.append(new_node)
+                    prod_str = f"{head} → {' '.join(body) if body else EPSILON}"
+                    
+                    if body:
+                        for _ in body:
+                            state_stack.pop()
+                            if node_stack:
+                                node_stack.pop()
+                    
                     goto_state = self.goto.get((state_stack[-1], head))
                     if goto_state is None:
-                        raise ValueError(f"Goto no definido para (estado {state_stack[-1]}, '{head}').")
+                        add_step("error", f"✗ GOTO indefinido en estado {state_stack[-1]}, '{head}'.")
+                        return self._make_result(
+                            is_valid=False,
+                            steps=steps,
+                            error_message=f"Goto no definido para (estado {state_stack[-1]}, '{head}').",
+                            tokens_consumed=pos,
+                            total_tokens=len(tokens),
+                        )
+                    
+                    add_step("reduce", f"Reduce [{prod_str}] → estado {goto_state}.", production=prod_str)
                     state_stack.append(goto_state)
+                    new_node = ParseNode(symbol=head, children=[])
+                    node_stack.append(new_node)
                 elif kind == "accept":
-                    root = node_stack[0].to_dict() if node_stack else None
-                    return self._make_result(is_valid=True, steps=[], error_message=None, tokens_consumed=pos, total_tokens=len(tokens) - 1)
+                    add_step("accept", "✓ Cadena ACEPTADA.")
+                    return self._make_result(
+                        is_valid=True,
+                        steps=steps,
+                        error_message=None,
+                        tokens_consumed=pos,
+                        total_tokens=len(tokens),
+                    )
                 else:
-                    raise ValueError(f"Acción desconocida: {kind}")
+                    add_step("error", f"✗ Acción desconocida: {kind}")
+                    return self._make_result(
+                        is_valid=False,
+                        steps=steps,
+                        error_message=f"Acción desconocida: {kind}",
+                        tokens_consumed=pos,
+                        total_tokens=len(tokens),
+                    )
 
         except Exception as e:
-            return self._make_result(is_valid=False, steps=[], error_message=str(e), tokens_consumed=pos, total_tokens=len(tokens) - 1)
+            return self._make_result(
+                is_valid=False,
+                steps=steps,
+                error_message=str(e),
+                tokens_consumed=pos,
+                total_tokens=len(tokens),
+            )
+
+    def _build_productions_list(self) -> List[Tuple[str, List[str]]]:
+        """Devuelve las producciones en forma lineal."""
+        prods_list = []
+        for lhs, rhss in self.aug_productions.items():
+            for rhs in rhss:
+                prods_list.append((lhs, rhs))
+        return prods_list
 
     def _format_tables(self) -> tuple[dict, dict]:
         prods_list = []
@@ -334,7 +416,7 @@ class LALR1Parser:
         }
         return {
             "is_valid": is_valid,
-            "steps": steps,
+            "steps": [s.to_dict() for s in steps],
             "action_table": action_table,
             "goto_table": goto_table,
             "first": first,
