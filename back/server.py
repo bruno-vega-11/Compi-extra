@@ -87,6 +87,24 @@ def build_grammar(grammar_text: str) -> Grammar:
         raise HTTPException(status_code=400, detail=f"Gramática inválida: {e}")
 
 
+def _result_to_dict(result):
+    """Normaliza el resultado del parser a dict.
+
+    Acepta lo siguiente:
+      - objeto con `to_dict()` (ParseResult antiguos)
+      - dict ya formateado (nuevos parsers)
+    """
+    if isinstance(result, dict):
+        return result
+    if hasattr(result, "to_dict") and callable(result.to_dict):
+        try:
+            return result.to_dict()
+        except Exception:
+            pass
+    # fallback
+    return {"is_valid": False, "steps": [], "action_table": {}, "goto_table": {}, "first": {}, "follow": {}, "states": [], "conflicts": [], "error_message": str(result), "tokens_consumed": 0, "total_tokens": 0}
+
+
 # ──────────────────────────────────────────────────────────────────────────── #
 # Ruta raíz
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -162,7 +180,7 @@ def parse_recursive_descent(request: ParseRequest):
         "method": "recursive-descent",
         "grammar": grammar.to_dict(),
         "generated_functions": parser.get_generated_functions_info(),
-        "result": result.to_dict(),
+        "result": _result_to_dict(result),
     }
 
 
@@ -183,7 +201,7 @@ def parse_ll1(request: ParseRequest):
         "method": "ll1",
         "grammar": grammar.to_dict(),
         "parsing_table": parser.get_table(),
-        "result": result.to_dict(),
+        "result": _result_to_dict(result),
     }
 
 
@@ -205,7 +223,7 @@ def parse_lr0(request: ParseRequest):
         "grammar": grammar.to_dict(),
         "automaton": parser.get_automaton(),
         "parsing_table": parser.get_table(),
-        "result": result.to_dict(),
+        "result": _result_to_dict(result),
     }
 
 
@@ -228,7 +246,7 @@ def parse_slr1(request: ParseRequest):
     return {
         "method":  "slr1",
         "grammar": grammar.to_dict(),
-        "result":  result.to_dict(),
+        "result":  _result_to_dict(result),
     }
 
 
@@ -250,7 +268,7 @@ def parse_lalr1(request: ParseRequest):
         "grammar": grammar.to_dict(),
         "automaton": parser.get_automaton(),
         "parsing_table": parser.get_table(),
-        "result": result.to_dict(),
+        "result": _result_to_dict(result),
     }
 
 
@@ -272,7 +290,7 @@ def parse_lr1(request: ParseRequest):
         "grammar": grammar.to_dict(),
         "automaton": parser.get_automaton(),
         "parsing_table": parser.get_table(),
-        "result": result.to_dict(),
+        "result": _result_to_dict(result),
     }
 
 

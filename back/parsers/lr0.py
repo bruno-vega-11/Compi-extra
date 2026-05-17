@@ -178,7 +178,7 @@ class LR0Parser:
             "action": {f"{s},{a}": v for (s, a), v in self.action.items()},
             "goto": {f"{s},{A}": j for (s, A), j in self.goto.items()},
         }
-
+    
     def parse(self, input_string: str) -> RDParseResult:
         tokens = input_string.strip().split()
         if not tokens:
