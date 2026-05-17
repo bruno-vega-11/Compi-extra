@@ -8,13 +8,14 @@ Cada endpoint recibe la gramática y la cadena del usuario,
 instancia el parser correspondiente y devuelve el resultado.
 
 Estructura de rutas:
-    POST /parse/recursive-descent   ← Descenso Recursivo  ✅ implementado
-    POST /parse/ll1                 ← LL(1)               🔜 pendiente
-    POST /parse/lr0                 ← LR(0)               🔜 pendiente
-    POST /parse/slr1                ← SLR(1)              🔜 pendiente
-    POST /parse/lalr1               ← LALR(1)             🔜 pendiente
-    POST /parse/lr1                 ← LR(1)               🔜 pendiente
-    POST /grammar/info              ← Info de la gramática (FIRST, FOLLOW, etc.)
+    POST /parse/recursive-descent  ← Descenso Recursivo  ✅ implementado
+    POST /parse/ll1                ← LL(1)               🔜 pendiente
+    POST /parse/lr0                ← LR(0)               ✅ implementado
+    POST /parse/slr1               ← SLR(1)              ✅ implementado
+    POST /parse/lalr1              ← LALR(1)             ✅ implementado
+    POST /parse/lr1                ← LR(1)               ✅ implementado
+    POST /grammar/info             ← Info de la gramática (FIRST, FOLLOW, etc.)
+    POST /grammar/automata/all     ← Autómatas completos para el frontend
 """
 
 import sys
@@ -30,6 +31,10 @@ from parsers.descenso_recursivo import RecursiveDescentParser
 
 from parsers.lr_automata import grammar_to_automata
 from parsers.slr1 import SLR1Parser
+from parsers.lr0 import LR0Parser
+from parsers.lr1 import LR1Parser
+from parsers.lalr1 import LALR1Parser
+
 # ──────────────────────────────────────────────────────────────────────────── #
 # App
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -53,31 +58,16 @@ app.add_middleware(
 # ──────────────────────────────────────────────────────────────────────────── #
 
 class ParseRequest(BaseModel):
-    """
-    Cuerpo de cualquier petición de parseo.
-
-    grammar_text: gramática en texto plano.
-        Ejemplo:
-            E -> T E2
-            E2 -> + T E2 | ε
-            T -> F T2
-            T2 -> * F T2 | ε
-            F -> ( E ) | id
-
-    input_string: cadena a analizar, tokens separados por espacios.
-        Ejemplo: "id + id * id"
-    """
     grammar_text: str
     input_string: str
 
 
 class GrammarRequest(BaseModel):
-    """Cuerpo para consultar info de una gramática sin parsear."""
     grammar_text: str
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
-# Helper: construir Grammar o lanzar 400
+# Helpers
 # ──────────────────────────────────────────────────────────────────────────── #
 
 def build_grammar(grammar_text: str) -> Grammar:
@@ -88,12 +78,7 @@ def build_grammar(grammar_text: str) -> Grammar:
 
 
 def _result_to_dict(result):
-    """Normaliza el resultado del parser a dict.
-
-    Acepta lo siguiente:
-      - objeto con `to_dict()` (ParseResult antiguos)
-      - dict ya formateado (nuevos parsers)
-    """
+    """Normaliza el resultado del parser a dict."""
     if isinstance(result, dict):
         return result
     if hasattr(result, "to_dict") and callable(result.to_dict):
@@ -101,12 +86,52 @@ def _result_to_dict(result):
             return result.to_dict()
         except Exception:
             pass
-    # fallback
     return {"is_valid": False, "steps": [], "action_table": {}, "goto_table": {}, "first": {}, "follow": {}, "states": [], "conflicts": [], "error_message": str(result), "tokens_consumed": 0, "total_tokens": 0}
 
 
+def _format_automata(parser, is_lalr=False):
+    """Formatea la estructura interna de los estados LR(1)/LALR(1) para el frontend."""
+    states = []
+    for i, state_set in enumerate(parser.states):
+        items_formatted = []
+        is_accept = False
+        # Ordenamos los items para que se mantengan consistentes visualmente
+        for it in sorted(state_set, key=repr):
+            item_repr = repr(it)
+            completed = it.is_complete()
+            items_formatted.append({"label": item_repr, "completed": completed})
+            
+            # Chequeo de estado de aceptación (S' -> S •)
+            if it.head == parser.augmented_start and completed:
+                is_accept = True
+        
+        states.append({
+            "id": str(i),
+            "label": f"I{i}",
+            "is_start": i == 0,
+            "is_accept": is_accept,
+            "items": items_formatted,
+        })
+        
+    transitions = []
+    for (src, sym), dst in parser.transitions.items():
+        transitions.append({
+            "from": str(src),
+            "to": str(dst),
+            "symbol": sym
+        })
+        
+    return {
+        "type": "LALR(1) DFA" if is_lalr else "LR(1) DFA",
+        "states": states,
+        "transitions": transitions,
+        "start_state": "0",
+        "accept_states": [s["id"] for s in states if s["is_accept"]]
+    }
+
+
 # ──────────────────────────────────────────────────────────────────────────── #
-# Ruta raíz
+# Rutas Generales
 # ──────────────────────────────────────────────────────────────────────────── #
 
 @app.get("/")
@@ -123,17 +148,8 @@ def root():
         ],
     }
 
-
-# ──────────────────────────────────────────────────────────────────────────── #
-# Grammar info
-# ──────────────────────────────────────────────────────────────────────────── #
-
 @app.post("/grammar/info")
 def grammar_info(request: GrammarRequest):
-    """
-    Devuelve información de la gramática: producciones, terminales,
-    no terminales, conjuntos FIRST y FOLLOW.
-    """
     grammar = build_grammar(request.grammar_text)
     warnings = grammar.validate()
     return {
@@ -142,40 +158,59 @@ def grammar_info(request: GrammarRequest):
     }
 
 
-
-@app.post("/grammar/automata")
-def grammar_automata(request: GrammarRequest):
+@app.post("/grammar/automata/all")
+def grammar_automata_all(request: GrammarRequest):
     """
-    Devuelve el AFN y AFD del proceso LR(0) para graficar en el frontend.
-
+    Construye y devuelve todos los autómatas disponibles para la gramática dada.
+    Esto alimenta la vista gráfica del frontend de una sola vez.
     """
     grammar = build_grammar(request.grammar_text)
-    return grammar_to_automata(grammar)
+    
+    # 1. LR(0) NFA / DFA
+    try:
+        lr0_automata = grammar_to_automata(grammar)
+    except Exception:
+        lr0_automata = {"afn": None, "afd": None}
+
+    # 2. LR(1) Automaton
+    lr1_data = None
+    try:
+        lr1_parser = LR1Parser(grammar)
+        lr1_data = _format_automata(lr1_parser, is_lalr=False)
+    except Exception:
+        pass
+
+    # 3. LALR(1) Automaton
+    lalr1_data = None
+    try:
+        lalr1_parser = LALR1Parser(grammar)
+        lalr1_data = _format_automata(lalr1_parser, is_lalr=True)
+    except Exception:
+        pass
+
+    return {
+        "afn": lr0_automata.get("afn"),
+        "afd": lr0_automata.get("afd"),
+        "lr1_afn": None, # Actualmente no estamos generando NFA explícito para LR(1)
+        "lr1": lr1_data,
+        "lalr1": lalr1_data
+    }
+
 
 # ──────────────────────────────────────────────────────────────────────────── #
-# Descenso Recursivo  ✅
+# Endpoints de Parseo
 # ──────────────────────────────────────────────────────────────────────────── #
 
 @app.post("/parse/recursive-descent")
 def parse_recursive_descent(request: ParseRequest):
-    """
-    Parseo por Descenso Recursivo con funciones generadas dinámicamente.
-
-    Genera una función parse_NT() por cada No Terminal de la gramática,
-    usando check() para decidir qué producción tomar — equivalente al
-    descenso recursivo escrito a mano en C++ o Java.
-
-    Requiere que la gramática sea LL(1) y sin recursión izquierda.
-    """
     grammar = build_grammar(request.grammar_text)
-
     try:
         parser = RecursiveDescentParser(grammar)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-
+    
     result = parser.parse(request.input_string)
-
+    
     return {
         "method": "recursive-descent",
         "grammar": grammar.to_dict(),
@@ -183,10 +218,6 @@ def parse_recursive_descent(request: ParseRequest):
         "result": _result_to_dict(result),
     }
 
-
-# ──────────────────────────────────────────────────────────────────────────── #
-# LL(1)  🔜
-# ──────────────────────────────────────────────────────────────────────────── #
 
 @app.post("/parse/ll1")
 def parse_ll1(request: ParseRequest):
@@ -197,52 +228,40 @@ def parse_ll1(request: ParseRequest):
         result = parser.parse(request.input_string)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+        
     return {
         "method": "ll1",
         "grammar": grammar.to_dict(),
-        "parsing_table": parser.get_table(),
         "result": _result_to_dict(result),
     }
 
-
-# ──────────────────────────────────────────────────────────────────────────── #
-# LR(0)  🔜
-# ──────────────────────────────────────────────────────────────────────────── #
 
 @app.post("/parse/lr0")
 def parse_lr0(request: ParseRequest):
     grammar = build_grammar(request.grammar_text)
     try:
-        from parsers.lr0 import LR0Parser
         parser = LR0Parser(grammar)
         result = parser.parse(request.input_string)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+        
     return {
         "method": "lr0",
         "grammar": grammar.to_dict(),
-        "automaton": parser.get_automaton(),
-        "parsing_table": parser.get_table(),
         "result": _result_to_dict(result),
     }
 
 
-# ──────────────────────────────────────────────────────────────────────────── #
-# SLR(1)  🔜
-# ──────────────────────────────────────────────────────────────────────────── #
-
 @app.post("/parse/slr1")
 def parse_slr1(request: ParseRequest):
-
     grammar = build_grammar(request.grammar_text)
- 
     try:
         parser = SLR1Parser(grammar)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error al construir el parser: {e}")
- 
+        
     result = parser.parse(request.input_string)
- 
+    
     return {
         "method":  "slr1",
         "grammar": grammar.to_dict(),
@@ -250,46 +269,34 @@ def parse_slr1(request: ParseRequest):
     }
 
 
-# ──────────────────────────────────────────────────────────────────────────── #
-# LALR(1)  🔜
-# ──────────────────────────────────────────────────────────────────────────── #
-
 @app.post("/parse/lalr1")
 def parse_lalr1(request: ParseRequest):
     grammar = build_grammar(request.grammar_text)
     try:
-        from parsers.lalr1 import LALR1Parser
         parser = LALR1Parser(grammar)
         result = parser.parse(request.input_string)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+        
     return {
         "method": "lalr1",
         "grammar": grammar.to_dict(),
-        "automaton": parser.get_automaton(),
-        "parsing_table": parser.get_table(),
         "result": _result_to_dict(result),
     }
 
-
-# ──────────────────────────────────────────────────────────────────────────── #
-# LR(1)  🔜
-# ──────────────────────────────────────────────────────────────────────────── #
 
 @app.post("/parse/lr1")
 def parse_lr1(request: ParseRequest):
     grammar = build_grammar(request.grammar_text)
     try:
-        from parsers.lr1 import LR1Parser
         parser = LR1Parser(grammar)
         result = parser.parse(request.input_string)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+        
     return {
         "method": "lr1",
         "grammar": grammar.to_dict(),
-        "automaton": parser.get_automaton(),
-        "parsing_table": parser.get_table(),
         "result": _result_to_dict(result),
     }
 
