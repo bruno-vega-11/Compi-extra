@@ -211,6 +211,44 @@ class Grammar:
         return warnings
 
     # ------------------------------------------------------------------ #
+    # Aumento
+    # ------------------------------------------------------------------ #
+    
+    def augment(self) -> Grammar:
+
+        new_start = self.start_symbol + "'"
+
+        while new_start in self.productions:
+            new_start += "'"
+
+        new_productions = {
+            new_start: [[self.start_symbol]],
+            **self.productions
+        }
+
+        return Grammar(
+            start_symbol=new_start,
+            productions=new_productions
+        )
+        
+    def productions_list(self) -> List[Tuple[str, List[str]]]:
+        """
+        Devuelve las producciones en forma lineal:
+
+        [
+            ("E", ["E", "+", "T"]),
+            ("E", ["T"]),
+            ...
+        ]
+        """
+        result = []
+
+        for lhs, prods in self.productions.items():
+            for rhs in prods:
+                result.append((lhs, rhs))
+
+        return result
+    # ------------------------------------------------------------------ #
     # Representación
     # ------------------------------------------------------------------ #
 
