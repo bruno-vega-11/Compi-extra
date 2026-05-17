@@ -27,6 +27,9 @@ from pydantic import BaseModel
 
 from grammar.grammar import Grammar
 from parsers.descenso_recursivo import RecursiveDescentParser
+
+from parsers.lr_automata import grammar_to_automata
+from parsers.slr1 import SLR1Parser
 # ──────────────────────────────────────────────────────────────────────────── #
 # App
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -121,6 +124,16 @@ def grammar_info(request: GrammarRequest):
     }
 
 
+
+@app.post("/grammar/automata")
+def grammar_automata(request: GrammarRequest):
+    """
+    Devuelve el AFN y AFD del proceso LR(0) para graficar en el frontend.
+
+    """
+    grammar = build_grammar(request.grammar_text)
+    return grammar_to_automata(grammar)
+
 # ──────────────────────────────────────────────────────────────────────────── #
 # Descenso Recursivo  ✅
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -202,19 +215,20 @@ def parse_lr0(request: ParseRequest):
 
 @app.post("/parse/slr1")
 def parse_slr1(request: ParseRequest):
+
     grammar = build_grammar(request.grammar_text)
+ 
     try:
-        from parsers.slr1 import SLR1Parser
         parser = SLR1Parser(grammar)
-        result = parser.parse(request.input_string)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error al construir el parser: {e}")
+ 
+    result = parser.parse(request.input_string)
+ 
     return {
-        "method": "slr1",
+        "method":  "slr1",
         "grammar": grammar.to_dict(),
-        "automaton": parser.get_automaton(),
-        "parsing_table": parser.get_table(),
-        "result": result.to_dict(),
+        "result":  result.to_dict(),
     }
 
 

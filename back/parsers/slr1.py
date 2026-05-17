@@ -1,203 +1,411 @@
-"""
-slr1.py
-------
-Parser SLR(1) usando el autómata LR(0) y conjuntos FOLLOW para reducciones.
-
-Este parser construye el mismo autómata LR(0) que `lr0.py` pero en lugar de
-aplicar reducciones en todos los terminales, solo las aplica en los símbolos de
-FOLLOW del no terminal reducido.
-"""
 from __future__ import annotations
-from typing import Dict, List, Tuple, Set, Any
+from dataclasses import dataclass, field
+from collections import defaultdict
+from typing import Optional
 
 from grammar.grammar import Grammar, EPSILON
-from parsers.descenso_recursivo import ParseResult, ParseNode
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Item LR(0)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@dataclass(frozen=True)
 class Item:
-    def __init__(self, head: str, body: List[str], dot: int):
-        self.head = head
-        self.body = body
-        self.dot = dot
+    lhs: str
+    rhs: tuple
+    dot: int
 
-    def next_symbol(self):
-        if self.dot < len(self.body):
-            return self.body[self.dot]
-        return None
+    @property
+    def completed(self) -> bool:
+        return self.dot >= len(self.rhs)
 
-    def is_complete(self):
-        return self.dot >= len(self.body)
+    @property
+    def next_symbol(self) -> Optional[str]:
+        return None if self.completed else self.rhs[self.dot]
 
-    def advance(self):
-        return Item(self.head, self.body, self.dot + 1)
-
-    def key(self):
-        return (self.head, tuple(self.body), self.dot)
-
-    def __eq__(self, other: Any) -> bool:
-        return isinstance(other, Item) and self.key() == other.key()
-
-    def __hash__(self) -> int:
-        return hash(self.key())
+    def advance(self) -> Item:
+        return Item(self.lhs, self.rhs, self.dot + 1)
 
     def __repr__(self) -> str:
-        rhs = list(self.body)
-        rhs.insert(self.dot, '•')
-        return f"{self.head} -> {' '.join(rhs)}"
+        rhs = list(self.rhs)
+        rhs.insert(self.dot, "•")
+        body = " ".join(rhs) if rhs else EPSILON
+        return f"[{self.lhs} → {body}]"
 
 
-class SLR1Parser:
+# ══════════════════════════════════════════════════════════════════════════════
+# Autómata LR(0)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class LR0Automaton:
+    #Conjuntos de items LR + transiciones
+    
     def __init__(self, grammar: Grammar):
         self.grammar = grammar
-        self.augmented_start = f"{grammar.start_symbol}'"
-        self._build_augmented()
-        self.states: List[Set[Item]] = []
-        self._build_automaton()
-        self.action: Dict[Tuple[int, str], Tuple[str, Any]] = {}
-        self.goto: Dict[Tuple[int, str], int] = {}
-        self._build_parsing_table()
+        self.states: list[frozenset[Item]] = []
+        self.transitions: dict[tuple[int, str], int] = {}
+        self._build()
 
-    def _build_augmented(self):
-        self.aug_productions = {**self.grammar.productions}
-        if self.augmented_start in self.aug_productions:
-            raise ValueError("Nombre del símbolo aumentado ya existe en la gramática.")
-        self.aug_productions[self.augmented_start] = [[self.grammar.start_symbol]]
-
-    def _normalize_body(self, body: List[str]) -> List[str]:
-        return [] if body == [EPSILON] else body
-
-    def _closure(self, items: Set[Item]) -> Set[Item]:
+    def _closure(self, items: set[Item]) -> frozenset[Item]:
         closure = set(items)
-        added = True
-        while added:
-            added = False
-            for it in list(closure):
-                sym = it.next_symbol()
-                if sym and sym in self.aug_productions:
-                    for prod in self.aug_productions[sym]:
-                        prod = self._normalize_body(prod)
-                        new_item = Item(sym, prod, 0)
-                        if new_item not in closure:
-                            closure.add(new_item)
-                            added = True
-        return closure
-
-    def _goto(self, items: Set[Item], symbol: str) -> Set[Item]:
-        moved = set()
-        for it in items:
-            if it.next_symbol() == symbol:
-                moved.add(it.advance())
-        return self._closure(moved)
-
-    def _build_automaton(self):
-        start_item = Item(self.augmented_start, self.aug_productions[self.augmented_start][0], 0)
-        start_state = self._closure({start_item})
-        states = [start_state]
-        transitions = {}
-
         changed = True
         while changed:
             changed = False
-            for i, state in enumerate(list(states)):
-                symbols = {it.next_symbol() for it in state if it.next_symbol()}
-                for sym in symbols:
-                    tgt = self._goto(state, sym)
-                    if not tgt:
-                        continue
-                    if tgt not in states:
-                        states.append(tgt)
-                        changed = True
-                    j = states.index(tgt)
-                    transitions[(i, sym)] = j
+            to_add = set()
+            for item in closure:
+                B = item.next_symbol
+                if B and B in self.grammar.non_terminals:
+                    for rhs in self.grammar.productions.get(B, []):
+                        new_item = Item(B, tuple(rhs), 0)
+                        if new_item not in closure:
+                            to_add.add(new_item)
+                            changed = True
+            closure |= to_add
+        return frozenset(closure)
 
-        self.states = states
-        self.transitions = transitions
+    def _goto(self, state: frozenset[Item], symbol: str) -> frozenset[Item]:
+        """GOTO(I, X): avanza el punto sobre X y calcula clausura."""
+        moved = {item.advance() for item in state if item.next_symbol == symbol}
+        return self._closure(moved) if moved else frozenset()
 
-    def _build_parsing_table(self):
-        for i, state in enumerate(self.states):
-            for it in state:
-                if not it.is_complete():
-                    a = it.next_symbol()
-                    if (i, a) in self.transitions and a not in self.aug_productions:
-                        j = self.transitions[(i, a)]
-                        key = (i, a)
-                        if key in self.action and self.action[key] != ("shift", j):
-                            raise ValueError(f"Conflicto ACTION en estado {i} sobre '{a}'")
-                        self.action[key] = ("shift", j)
+    def _build(self):
+        start = self.grammar.start_symbol
+        start_rhs = tuple(self.grammar.productions[start][0])
+        initial = self._closure({Item(start, start_rhs, 0)})
+
+        self.states = [initial]
+        state_index: dict[frozenset[Item], int] = {initial: 0}
+        worklist = [initial]
+
+        while worklist:
+            current = worklist.pop()
+            idx = state_index[current]
+            symbols = {item.next_symbol for item in current if item.next_symbol}
+            for sym in symbols:
+                nxt = self._goto(current, sym)
+                if not nxt:
+                    continue
+                if nxt not in state_index:
+                    state_index[nxt] = len(self.states)
+                    self.states.append(nxt)
+                    worklist.append(nxt)
+                self.transitions[(idx, sym)] = state_index[nxt]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Tabla SLR(1)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class SLR1Table:
+    action: dict = field(default_factory=lambda: defaultdict(list))
+    goto: dict = field(default_factory=dict)
+    conflicts: list = field(default_factory=list)
+
+    def has_conflicts(self) -> bool:
+        return bool(self.conflicts)
+
+
+def build_slr1_table(aug_grammar: Grammar, orig_grammar: Grammar, automaton: LR0Automaton) -> SLR1Table:
+    table = SLR1Table()
+    prods_list = aug_grammar.productions_list()
+    aug_start = aug_grammar.start_symbol
+
+    for i, state in enumerate(automaton.states):
+        for item in state:
+            sym = item.next_symbol
+
+            if sym:
+                j = automaton.transitions.get((i, sym))
+                if j is None:
+                    continue
+                if sym in aug_grammar.terminals:
+                    entry = f"s{j}"
+                    if entry not in table.action[(i, sym)]:
+                        table.action[(i, sym)].append(entry)
+                elif sym in aug_grammar.non_terminals:
+                    table.goto[(i, sym)] = j
+            else:
+                if item.lhs == aug_start:
+                    if "acc" not in table.action[(i, "$")]:
+                        table.action[(i, "$")].append("acc")
                 else:
-                    if it.head == self.augmented_start:
-                        key = (i, "$")
-                        if key in self.action and self.action[key] != ("accept", 0):
-                            raise ValueError(f"Conflicto ACTION en estado {i} sobre '$'")
-                        self.action[key] = ("accept", 0)
-                    else:
-                        for t in self.grammar.follow(it.head):
-                            key = (i, t)
-                            rule_idx = (it.head, tuple(it.body))
-                            if key in self.action and self.action[key] != ("reduce", rule_idx):
-                                raise ValueError(f"Conflicto reduce en estado {i} sobre '{t}'")
-                            self.action[key] = ("reduce", rule_idx)
+                    rhs = list(item.rhs)
+                    prod_idx = next(
+                        idx for idx, (lhs, r) in enumerate(prods_list)
+                        if lhs == item.lhs and r == rhs
+                    )
+                    entry = f"r{prod_idx}"
+                    for term in orig_grammar.follow(item.lhs):
+                        if entry not in table.action[(i, term)]:
+                            table.action[(i, term)].append(entry)
 
-            for (s, sym), j in self.transitions.items():
-                if s == i and sym in self.aug_productions:
-                    self.goto[(i, sym)] = j
+    for (state, sym), actions in table.action.items():
+        if len(actions) > 1:
+            table.conflicts.append(
+                f"Conflicto en estado {state}, símbolo '{sym}': {actions}"
+            )
 
-    def get_automaton(self):
+    return table
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Resultado
+# ══════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class ParseStep:
+    step_number: int
+    action: str       
+    description: str
+    stack: list
+    remaining_input: list
+    production_used: Optional[str] = None
+
+    def to_dict(self) -> dict:
         return {
-            "states": [[repr(it) for it in st] for st in self.states],
-            "transitions": {f"{s}->{sym}": t for (s, sym), t in self.transitions.items()},
+            "step_number":    self.step_number,
+            "action":         self.action,
+            "description":    self.description,
+            "stack":          self.stack,
+            "remaining_input": self.remaining_input,
+            "production_used": self.production_used,
         }
 
-    def get_table(self):
+
+@dataclass
+class ParseResult:
+    is_valid: bool
+    steps: list
+    action_table: dict   
+    goto_table: dict    
+    first: dict          
+    follow: dict         
+    states: list
+    conflicts: list
+    error_message: Optional[str]
+    tokens_consumed: int
+    total_tokens: int
+
+    def to_dict(self) -> dict:
         return {
-            "action": {f"{s},{a}": v for (s, a), v in self.action.items()},
-            "goto": {f"{s},{A}": j for (s, A), j in self.goto.items()},
+            "is_valid":        self.is_valid,
+            "steps":           self.steps,
+            "action_table":    self.action_table,
+            "goto_table":      self.goto_table,
+            "first":           self.first,
+            "follow":          self.follow,
+            "states":          self.states,
+            "conflicts":       self.conflicts,
+            "error_message":   self.error_message,
+            "tokens_consumed": self.tokens_consumed,
+            "total_tokens":    self.total_tokens,
         }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Parser SLR(1)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class SLR1Parser:
+
+    def __init__(self, grammar: Grammar):
+        """
+        Recibe una Grammar ya construida (via Grammar.from_text() o manual).
+        Internamente la aumenta, construye el autómata y la tabla.
+        """
+        self.orig_grammar = grammar
+        self.aug_grammar  = grammar.augment()
+        self.automaton    = LR0Automaton(self.aug_grammar)
+        self.table        = build_slr1_table(self.aug_grammar, self.orig_grammar, self.automaton)
+
+    # ── Punto de entrada ─────────────────────────────────────────────────────
 
     def parse(self, input_string: str) -> ParseResult:
-        tokens = input_string.strip().split()
-        if not tokens:
-            return ParseResult(False, None, [], "La cadena de entrada está vacía.", 0, 0)
+        """
+        Analiza una cadena de tokens separados por espacios.
+        Ejemplo: "id + id * id"
+        """
+        tokens = input_string.strip().split() if input_string.strip() else []
+        tokens_eof = tokens + ["$"]
 
-        tokens.append("$")
-        state_stack: List[int] = [0]
-        node_stack: List[ParseNode] = []
+        stack: list[int] = [0]
         pos = 0
+        steps: list[ParseStep] = []
+        step_n = 0
+        prods_list = self.aug_grammar.productions_list()
 
-        try:
-            while True:
-                state = state_stack[-1]
-                a = tokens[pos] if pos < len(tokens) else "$"
-                action = self.action.get((state, a))
-                if action is None:
-                    raise ValueError(f"Tabla SLR(1): no hay acción para (estado {state}, '{a}').")
+        def add_step(action, description, production=None):
+            nonlocal step_n
+            step_n += 1
+            steps.append(ParseStep(
+                step_number=step_n,
+                action=action,
+                description=description,
+                stack=list(stack),
+                remaining_input=list(tokens_eof[pos:]),
+                production_used=production,
+            ))
 
-                kind, val = action
-                if kind == "shift":
-                    node = ParseNode(symbol=a, is_terminal=True, matched_token=a)
-                    node_stack.append(node)
-                    state_stack.append(val)
-                    pos += 1
-                elif kind == "reduce":
-                    head, body = val
-                    body = list(body)
-                    children = []
-                    for _ in range(len(body)):
-                        if not node_stack:
-                            raise ValueError("Error interno en reducción: pila de nodos vacía.")
-                        children.insert(0, node_stack.pop())
-                        state_stack.pop()
-                    new_node = ParseNode(symbol=head, children=children)
-                    node_stack.append(new_node)
-                    goto_state = self.goto.get((state_stack[-1], head))
-                    if goto_state is None:
-                        raise ValueError(f"Goto no definido para (estado {state_stack[-1]}, '{head}').")
-                    state_stack.append(goto_state)
-                elif kind == "accept":
-                    root = node_stack[0].to_dict() if node_stack else None
-                    return ParseResult(True, root, [], None, pos, len(tokens) - 1)
-                else:
-                    raise ValueError(f"Acción desconocida: {kind}")
+        while True:
+            state = stack[-1]
+            token = tokens_eof[pos]
+            actions = self.table.action.get((state, token), [])
 
-        except Exception as e:
-            return ParseResult(False, None, [], str(e), pos, len(tokens) - 1)
+            if not actions:
+                add_step(
+                    "error",
+                    f"✗ Token '{token}' inesperado en estado {state}. "
+                    f"No existe acción definida."
+                )
+                return self._make_result(
+                    is_valid=False,
+                    steps=steps,
+                    error_message=self._build_error_msg(token, pos, tokens),
+                    tokens_consumed=pos,
+                    total_tokens=len(tokens),
+                )
+
+            action = actions[0]
+
+            if action == "acc":
+                add_step("accept", "✓ Cadena ACEPTADA.")
+                return self._make_result(
+                    is_valid=True,
+                    steps=steps,
+                    error_message=None,
+                    tokens_consumed=pos,
+                    total_tokens=len(tokens),
+                )
+
+            elif action.startswith("s"):
+                next_state = int(action[1:])
+                add_step("shift", f"Shift '{token}' → estado {next_state}.")
+                stack.append(next_state)
+                pos += 1
+
+            elif action.startswith("r"):
+                prod_idx = int(action[1:])
+                lhs, rhs = prods_list[prod_idx]
+                prod_str = f"{lhs} → {' '.join(rhs) if rhs else EPSILON}"
+
+                if rhs and rhs != [EPSILON]:
+                    for _ in rhs:
+                        stack.pop()
+
+                goto_state = self.table.goto.get((stack[-1], lhs))
+                if goto_state is None:
+                    add_step("error", f"✗ GOTO indefinido en estado {stack[-1]}, '{lhs}'.")
+                    return self._make_result(
+                        is_valid=False,
+                        steps=steps,
+                        error_message=f"GOTO indefinido tras reducir por '{prod_str}'.",
+                        tokens_consumed=pos,
+                        total_tokens=len(tokens),
+                    )
+
+                stack.append(goto_state)
+                add_step("reduce", f"Reduce [{prod_str}] → estado {goto_state}.", production=prod_str)
+
+    # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def _make_result(self, *, is_valid, steps, error_message, tokens_consumed, total_tokens) -> ParseResult:
+        action_table, goto_table = self._format_tables()
+        return ParseResult(
+            is_valid=is_valid,
+            steps=[s.to_dict() for s in steps],
+            action_table=action_table,
+            goto_table=goto_table,
+            first={
+                nt: sorted(v - {EPSILON}) + (["ε"] if EPSILON in v else [])
+                for nt, v in self.orig_grammar._first.items()
+            },
+            follow={
+                nt: sorted(v - {"$"}) + (["$"] if "$" in v else [])
+                for nt, v in self.orig_grammar._follow.items()
+            },
+            states=self._states_repr(),
+            conflicts=self.table.conflicts,
+            error_message=error_message,
+            tokens_consumed=tokens_consumed,
+            total_tokens=total_tokens,
+        )
+
+    def _format_tables(self) -> tuple[dict, dict]:
+        """
+        Convierte ACTION y GOTO a formato JSON-serializable para el frontend.
+
+        action_table:
+          { terminals: [...], rows: [{ state, "$": "acc", "(": "s2", ... }], productions: [...] }
+
+        goto_table:
+          { nonterminals: [...], rows: [{ state, "E": "1", "T": "4", ... }] }
+        """
+        prods_list   = self.aug_grammar.productions_list()
+        num_states   = len(self.automaton.states)
+        terminals    = sorted(self.aug_grammar.terminals | {"$"})
+        nonterminals = list(self.orig_grammar.productions.keys())  
+
+        # ACTION
+        action_rows = []
+        for i in range(num_states):
+            row: dict = {"state": i}
+            for t in terminals:
+                row[t] = "/".join(self.table.action.get((i, t), []))
+            action_rows.append(row)
+
+        productions_legend = [
+            {"index": idx, "production": f"{lhs} → {' '.join(rhs) if rhs else EPSILON}"}
+            for idx, (lhs, rhs) in enumerate(prods_list)
+        ]
+
+        action_table = {
+            "terminals":   terminals,
+            "rows":        action_rows,
+            "productions": productions_legend,
+        }
+
+        # GOTO
+        goto_rows = []
+        for i in range(num_states):
+            row = {"state": i}
+            for nt in nonterminals:
+                g = self.table.goto.get((i, nt))
+                row[nt] = str(g) if g is not None else ""
+            goto_rows.append(row)
+
+        goto_table = {
+            "nonterminals": nonterminals,
+            "rows":         goto_rows,
+        }
+
+        return action_table, goto_table
+
+    def _build_error_msg(self, token: str, pos: int, tokens: list) -> str:
+        context = tokens[max(0, pos - 2): pos]
+        msg  = f"Error de sintaxis en la posición {pos + 1}.\n"
+        msg += f"Token problematico: '{token}'.\n"
+        if context:
+            msg += f"Tokens anteriores: {' '.join(context)}.\n"
+        msg += (
+            "\nEl analizador SLR(1) no encontró ninguna acción valida "
+            "para el token actual en el estado actual. "
+            "Verifica que la cadena pertenezca al lenguaje definido por la gramatica."
+        )
+        return msg
+
+    def _states_repr(self) -> list[dict]:
+        result = []
+        for i, state in enumerate(self.automaton.states):
+            result.append({
+                "id": i,
+                "items": [repr(item) for item in sorted(state, key=repr)],
+                "transitions": {
+                    sym: dst
+                    for (src, sym), dst in self.automaton.transitions.items()
+                    if src == i
+                },
+            })
+        return result
+
