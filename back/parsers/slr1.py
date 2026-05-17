@@ -1,17 +1,14 @@
 """
-lr0.py
------
-Implementación básica de un parser LR(0).
+slr1.py
+------
+Parser SLR(1) usando el autómata LR(0) y conjuntos FOLLOW para reducciones.
 
-Notas:
-- Construye el autómata de items LR(0) (clausura + goto)
-- Construye la tabla ACTION/GOTO usando reglas LR(0) (reduce aplicable en todos los símbolos de FOLLOW)
-- Detecta conflictos y lanza ValueError cuando ocurren
-
-Este módulo provee `LR0Parser(grammar)` con métodos `parse`, `get_automaton`, `get_table`.
+Este parser construye el mismo autómata LR(0) que `lr0.py` pero en lugar de
+aplicar reducciones en todos los terminales, solo las aplica en los símbolos de
+FOLLOW del no terminal reducido.
 """
 from __future__ import annotations
-from typing import Dict, List, Tuple, Set, FrozenSet, Any
+from typing import Dict, List, Tuple, Set, Any
 
 from grammar.grammar import Grammar, EPSILON
 from parsers.descenso_recursivo import ParseResult, ParseNode
@@ -49,20 +46,18 @@ class Item:
         return f"{self.head} -> {' '.join(rhs)}"
 
 
-class LR0Parser:
+class SLR1Parser:
     def __init__(self, grammar: Grammar):
         self.grammar = grammar
         self.augmented_start = f"{grammar.start_symbol}'"
-        # Construir gramática aumentada en memoria
         self._build_augmented()
         self.states: List[Set[Item]] = []
         self._build_automaton()
-        self.action: Dict[Tuple[int, str], Tuple[str, int]] = {}
+        self.action: Dict[Tuple[int, str], Tuple[str, Any]] = {}
         self.goto: Dict[Tuple[int, str], int] = {}
         self._build_parsing_table()
 
     def _build_augmented(self):
-        # Añadir S' -> S
         self.aug_productions = {**self.grammar.productions}
         if self.augmented_start in self.aug_productions:
             raise ValueError("Nombre del símbolo aumentado ya existe en la gramática.")
@@ -95,7 +90,6 @@ class LR0Parser:
         return self._closure(moved)
 
     def _build_automaton(self):
-        # Estado inicial: clausura de [S' -> . S]
         start_item = Item(self.augmented_start, self.aug_productions[self.augmented_start][0], 0)
         start_state = self._closure({start_item})
         states = [start_state]
@@ -105,11 +99,7 @@ class LR0Parser:
         while changed:
             changed = False
             for i, state in enumerate(list(states)):
-                symbols = set()
-                for it in state:
-                    sym = it.next_symbol()
-                    if sym:
-                        symbols.add(sym)
+                symbols = {it.next_symbol() for it in state if it.next_symbol()}
                 for sym in symbols:
                     tgt = self._goto(state, sym)
                     if not tgt:
@@ -128,7 +118,6 @@ class LR0Parser:
             for it in state:
                 if not it.is_complete():
                     a = it.next_symbol()
-                    # shift
                     if (i, a) in self.transitions and a not in self.aug_productions:
                         j = self.transitions[(i, a)]
                         key = (i, a)
@@ -136,28 +125,21 @@ class LR0Parser:
                             raise ValueError(f"Conflicto ACTION en estado {i} sobre '{a}'")
                         self.action[key] = ("shift", j)
                 else:
-                    # reduce (no para S')
                     if it.head == self.augmented_start:
-                        # Aceptar en $
                         key = (i, "$")
                         if key in self.action and self.action[key] != ("accept", 0):
                             raise ValueError(f"Conflicto ACTION en estado {i} sobre '$'")
                         self.action[key] = ("accept", 0)
                     else:
-                        # Para LR(0) puro aplicamos reducción en TODOS los símbolos terminales
-                        prod_len = len(it.body)
-                        for t in list(self.grammar.terminals) + ["$"]:
+                        for t in self.grammar.follow(it.head):
                             key = (i, t)
                             rule_idx = (it.head, tuple(it.body))
                             if key in self.action and self.action[key] != ("reduce", rule_idx):
                                 raise ValueError(f"Conflicto reduce en estado {i} sobre '{t}'")
                             self.action[key] = ("reduce", rule_idx)
 
-            # llenar GOTO desde transiciones para no terminales
             for (s, sym), j in self.transitions.items():
-                if s != i:
-                    continue
-                if sym in self.aug_productions:
+                if s == i and sym in self.aug_productions:
                     self.goto[(i, sym)] = j
 
     def get_automaton(self):
@@ -188,11 +170,10 @@ class LR0Parser:
                 a = tokens[pos] if pos < len(tokens) else "$"
                 action = self.action.get((state, a))
                 if action is None:
-                    raise ValueError(f"Tabla LR(0): no hay acción para (estado {state}, '{a}').")
+                    raise ValueError(f"Tabla SLR(1): no hay acción para (estado {state}, '{a}').")
 
                 kind, val = action
                 if kind == "shift":
-                    # push token node and next state
                     node = ParseNode(symbol=a, is_terminal=True, matched_token=a)
                     node_stack.append(node)
                     state_stack.append(val)
@@ -200,7 +181,6 @@ class LR0Parser:
                 elif kind == "reduce":
                     head, body = val
                     body = list(body)
-                    # pop |body| nodes
                     children = []
                     for _ in range(len(body)):
                         if not node_stack:
@@ -214,10 +194,7 @@ class LR0Parser:
                         raise ValueError(f"Goto no definido para (estado {state_stack[-1]}, '{head}').")
                     state_stack.append(goto_state)
                 elif kind == "accept":
-                    if len(node_stack) != 1:
-                        root = node_stack[0].to_dict() if node_stack else None
-                    else:
-                        root = node_stack[0].to_dict()
+                    root = node_stack[0].to_dict() if node_stack else None
                     return ParseResult(True, root, [], None, pos, len(tokens) - 1)
                 else:
                     raise ValueError(f"Acción desconocida: {kind}")

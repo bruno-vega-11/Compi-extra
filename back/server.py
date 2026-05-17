@@ -94,11 +94,11 @@ def root():
         "message": "Analizador Sintáctico API",
         "parsers_available": [
             "recursive-descent",
-            # "ll1",      🔜
-            # "lr0",      🔜
-            # "slr1",     🔜
-            # "lalr1",    🔜
-            # "lr1",      🔜
+            "ll1",
+            "lr0",
+            "slr1",
+            "lalr1",
+            "lr1",
         ],
     }
 
@@ -200,57 +200,66 @@ def parse_lr0(request: ParseRequest):
 # SLR(1)  🔜
 # ──────────────────────────────────────────────────────────────────────────── #
 
-# @app.post("/parse/slr1")
-# def parse_slr1(request: ParseRequest):
-#     grammar = build_grammar(request.grammar_text)
-#     from parsers.slr1 import SLR1Parser
-#     parser = SLR1Parser(grammar)
-#     result = parser.parse(request.input_string)
-#     return {
-#         "method": "slr1",
-#         "grammar": grammar.to_dict(),
-#         "automaton": parser.get_automaton(),
-#         "parsing_table": parser.get_table(),
-#         "result": result.to_dict(),
-#     }
+@app.post("/parse/slr1")
+def parse_slr1(request: ParseRequest):
+    grammar = build_grammar(request.grammar_text)
+    try:
+        from parsers.slr1 import SLR1Parser
+        parser = SLR1Parser(grammar)
+        result = parser.parse(request.input_string)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "method": "slr1",
+        "grammar": grammar.to_dict(),
+        "automaton": parser.get_automaton(),
+        "parsing_table": parser.get_table(),
+        "result": result.to_dict(),
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
 # LALR(1)  🔜
 # ──────────────────────────────────────────────────────────────────────────── #
 
-# @app.post("/parse/lalr1")
-# def parse_lalr1(request: ParseRequest):
-#     grammar = build_grammar(request.grammar_text)
-#     from parsers.lalr1 import LALR1Parser
-#     parser = LALR1Parser(grammar)
-#     result = parser.parse(request.input_string)
-#     return {
-#         "method": "lalr1",
-#         "grammar": grammar.to_dict(),
-#         "automaton": parser.get_automaton(),
-#         "parsing_table": parser.get_table(),
-#         "result": result.to_dict(),
-#     }
+@app.post("/parse/lalr1")
+def parse_lalr1(request: ParseRequest):
+    grammar = build_grammar(request.grammar_text)
+    try:
+        from parsers.lalr1 import LALR1Parser
+        parser = LALR1Parser(grammar)
+        result = parser.parse(request.input_string)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "method": "lalr1",
+        "grammar": grammar.to_dict(),
+        "automaton": parser.get_automaton(),
+        "parsing_table": parser.get_table(),
+        "result": result.to_dict(),
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
 # LR(1)  🔜
 # ──────────────────────────────────────────────────────────────────────────── #
 
-# @app.post("/parse/lr1")
-# def parse_lr1(request: ParseRequest):
-#     grammar = build_grammar(request.grammar_text)
-#     from parsers.lr1 import LR1Parser
-#     parser = LR1Parser(grammar)
-#     result = parser.parse(request.input_string)
-#     return {
-#         "method": "lr1",
-#         "grammar": grammar.to_dict(),
-#         "automaton": parser.get_automaton(),
-#         "parsing_table": parser.get_table(),
-#         "result": result.to_dict(),
-#     }
+@app.post("/parse/lr1")
+def parse_lr1(request: ParseRequest):
+    grammar = build_grammar(request.grammar_text)
+    try:
+        from parsers.lr1 import LR1Parser
+        parser = LR1Parser(grammar)
+        result = parser.parse(request.input_string)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "method": "lr1",
+        "grammar": grammar.to_dict(),
+        "automaton": parser.get_automaton(),
+        "parsing_table": parser.get_table(),
+        "result": result.to_dict(),
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
