@@ -97,7 +97,7 @@ interface DFAState {
   id: string;
   label: string;
   items: DFAItem[];
-  nfa_states: string[];
+  afn_states: string[];
   is_accept: boolean;
   is_start: boolean;
 }
@@ -109,7 +109,7 @@ interface DFATransition {
 }
 
 interface AutomataResponse {
-  nfa: {
+  afn: {
     type: string;
     states: NFAState[];
     transitions: NFATransition[];
@@ -117,7 +117,7 @@ interface AutomataResponse {
     start_state: string;
     accept_states: string[];
   };
-  dfa: {
+  afd: {
     type: string;
     states: DFAState[];
     transitions: DFATransition[];
@@ -220,7 +220,7 @@ export default function App() {
   const [automataLoading, setAutomataLoading] = useState(false);
   const [error, setError]             = useState<string | null>(null);
   const [activeTab, setActiveTab]     = useState<"steps" | "table" | "tree" | "grammar" | "automata">("steps");
-  const [automataView, setAutomataView] = useState<"dfa" | "nfa">("dfa");
+  const [automataView, setAutomataView] = useState<"afd" | "afn">("afd");
 
   const handleMethodChange = (m: ParserMethod) => {
     setMethod(m);
@@ -275,7 +275,9 @@ export default function App() {
         const data = await res.json();
         throw new Error(data.detail ?? "Error del servidor");
       }
-      setAutomata(await res.json());
+      const automataData = await res.json();
+      console.log("automata response:", JSON.stringify(automataData).slice(0, 300));
+      setAutomata(automataData);
       setActiveTab("automata");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Error desconocido");
@@ -722,14 +724,24 @@ function AutomataView({
   setView,
 }: {
   automata: AutomataResponse;
-  view: "dfa" | "nfa";
-  setView: (v: "dfa" | "nfa") => void;
+  view: "afd" | "afn";
+  setView: (v: "afd" | "afn") => void;
 }) {
   const [expandedState, setExpandedState] = useState<string | null>(null);
-  const { dfa, nfa } = automata;
+  const { afd: dfa, afn: nfa } = automata;
+
+  // Guard: si el backend no devolvió la estructura esperada, mostramos error
+  if (!dfa?.states || !nfa?.states) {
+    return (
+      <div className="p-6 text-red-400 text-xs">
+        ✗ La respuesta del servidor no tiene el formato esperado.
+        Verifica que <code>/grammar/automata</code> devuelva <code>{"{ afn, afd }"}</code>.
+      </div>
+    );
+  }
 
   // Build graph data without D3 types
-  const graphData: { nodes: GraphNode[]; links: GraphLink[] } = view === "dfa"
+  const graphData: { nodes: GraphNode[]; links: GraphLink[] } = view === "afd"
     ? {
         nodes: dfa.states.map(s => ({
           id: s.id,
@@ -762,7 +774,7 @@ function AutomataView({
     <div className="p-4 flex flex-col gap-3">
       <div className="flex items-center gap-3">
         <div className="flex gap-1">
-          {(["dfa", "nfa"] as const).map((v) => (
+          {(["afd", "afn"] as const).map((v) => (
             <button
               key={v}
               onClick={() => { setView(v); setExpandedState(null); }}
@@ -777,7 +789,7 @@ function AutomataView({
           ))}
         </div>
         <span className="text-xs text-zinc-600">
-          {view === "dfa"
+          {view === "afd"
             ? `${dfa.states.length} estados · ${dfa.transitions.length} transiciones`
             : `${nfa.states.length} items · ${nfa.transitions.length + nfa.epsilon_transitions.length} transiciones`}
         </span>
@@ -791,7 +803,7 @@ function AutomataView({
 
         {/* State list panel */}
         <div className="flex flex-col flex-1 gap-2 overflow-hidden">
-          {view === "dfa" && (
+          {view === "afd" && (
             <>
               <p className="text-[10px] text-zinc-500 uppercase tracking-widest flex-shrink-0">Estados DFA</p>
               <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
@@ -852,7 +864,7 @@ function AutomataView({
             </>
           )}
 
-          {view === "nfa" && (
+          {view === "afn" && (
             <div className="flex-1 overflow-y-auto flex flex-col gap-4 pr-1">
               <div>
                 <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">
