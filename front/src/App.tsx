@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import type {
   ParserMethod,
   AutomataView,
@@ -18,6 +18,7 @@ import { LRTableView } from "./views/Lrtableview";
 import { GrammarView } from "./views/Grammarview";
 import { AutomataView as AutomataViewComponent } from "./views/Automataview";
 import { TreeNode } from "./components/Treenode";
+import { VirtualKeyboard } from "./components/VirtualKeyboard";
 import type { TreeNodeType } from "./types";
 
 export default function App() {
@@ -32,6 +33,68 @@ export default function App() {
   const [error, setError]             = useState<string | null>(null);
   const [activeTab, setActiveTab]     = useState<"steps" | "table" | "tree" | "grammar" | "automata">("steps");
   const [automataView, setAutomataView] = useState<AutomataView>("afd");
+
+  // Refs para insertar en la posición del cursor
+  const grammarRef  = useRef<HTMLTextAreaElement>(null);
+  const inputRef    = useRef<HTMLInputElement>(null);
+  // Cuál campo está activo para el teclado virtual
+  const [activeField, setActiveField] = useState<"grammar" | "input">("grammar");
+
+  function insertAt(
+    current: string,
+    setter: (v: string) => void,
+    el: HTMLTextAreaElement | HTMLInputElement | null,
+    symbol: string,
+  ) {
+    if (!el) { setter(current + symbol); return; }
+    const start  = el.selectionStart ?? current.length;
+    const end    = el.selectionEnd   ?? current.length;
+    const before = current.slice(0, start);
+    const after  = current.slice(end);
+    // Añadir espacios automáticos solo para tokens multi-char de gramática
+    const needsPad = symbol.length > 1 && symbol !== "\n";
+    const padL = needsPad && before.length > 0 && !before.endsWith(" ") && !before.endsWith("\n") ? " " : "";
+    const padR = needsPad && after.length  > 0 && !after.startsWith(" ") && !after.startsWith("\n") ? " " : "";
+    const insert = padL + symbol + padR;
+    setter(before + insert + after);
+    const cursor = start + insert.length;
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(cursor, cursor); });
+  }
+
+  function backspaceAt(
+    current: string,
+    setter: (v: string) => void,
+    el: HTMLTextAreaElement | HTMLInputElement | null,
+  ) {
+    if (!el) { setter(current.slice(0, -1)); return; }
+    const start = el.selectionStart ?? current.length;
+    const end   = el.selectionEnd   ?? current.length;
+    if (start === end && start > 0) {
+      setter(current.slice(0, start - 1) + current.slice(start));
+      const cursor = start - 1;
+      requestAnimationFrame(() => { el.focus(); el.setSelectionRange(cursor, cursor); });
+    } else if (start !== end) {
+      setter(current.slice(0, start) + current.slice(end));
+      requestAnimationFrame(() => { el.focus(); el.setSelectionRange(start, start); });
+    }
+  }
+
+  // Handlers del teclado virtual según el campo activo
+  function kbInsert(sym: string) {
+    if (activeField === "grammar")
+      insertAt(grammarText, setGrammarText, grammarRef.current, sym);
+    else
+      insertAt(inputString, setInputString, inputRef.current, sym);
+  }
+  function kbBackspace() {
+    if (activeField === "grammar")
+      backspaceAt(grammarText, setGrammarText, grammarRef.current);
+    else
+      backspaceAt(inputString, setInputString, inputRef.current);
+  }
+  function kbEnter() {
+    insertAt(grammarText, setGrammarText, grammarRef.current, "\n");
+  }
 
   const isLR = ["ll1", "lr0", "slr1", "lalr1", "lr1"].includes(method);
 
@@ -107,7 +170,7 @@ export default function App() {
 
   return (
     <div style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace" }}
-         className="min-h-screen bg-zinc-950 text-zinc-100">
+         className="flex flex-col h-screen bg-zinc-950 text-zinc-100 overflow-hidden">
 
       {/* ── Header ── */}
       <header className="border-b border-zinc-800 px-8 py-4 flex items-center gap-4">
@@ -122,7 +185,7 @@ export default function App() {
         </div>
       </header>
 
-      <div className="flex h-[calc(100vh-57px)]">
+      <div className="flex flex-1 overflow-hidden">
 
         {/* ── Sidebar ── */}
         <aside className="w-52 border-r border-zinc-800 p-4 flex flex-col gap-1">
@@ -168,8 +231,10 @@ export default function App() {
             <div className="flex flex-col gap-2">
               <label className="text-xs text-zinc-500 uppercase tracking-widest">Gramática</label>
               <textarea
+                ref={grammarRef}
                 value={grammarText}
                 onChange={(e) => setGrammarText(e.target.value)}
+                onFocus={() => setActiveField("grammar")}
                 rows={6}
                 spellCheck={false}
                 className="bg-zinc-900 border border-zinc-700 rounded p-3 text-xs
@@ -180,24 +245,15 @@ export default function App() {
             <div className="flex flex-col gap-2">
               <label className="text-xs text-zinc-500 uppercase tracking-widest">Cadena de entrada</label>
               <input
+                ref={inputRef}
                 value={inputString}
                 onChange={(e) => setInputString(e.target.value)}
+                onFocus={() => setActiveField("input")}
                 spellCheck={false}
                 className="bg-zinc-900 border border-zinc-700 rounded p-3 text-xs
                            text-yellow-300 focus:outline-none focus:border-yellow-400/50"
               />
               <p className="text-xs text-zinc-600 mt-1">Tokens separados por espacios</p>
-              <button
-                onClick={handleParse}
-                disabled={loading}
-                className="mt-auto bg-green-400/10 border border-green-400/40
-                           text-green-400 text-xs px-6 py-3 rounded
-                           hover:bg-green-400/20 hover:border-green-400
-                           disabled:opacity-40 disabled:cursor-not-allowed
-                           transition-all tracking-widest uppercase"
-              >
-                {loading ? "Analizando..." : "▶  Analizar"}
-              </button>
             </div>
           </div>
 
@@ -308,6 +364,18 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {/* ── Teclado virtual global — se oculta cuando hay resultados ── */}
+      {!hasResponse && !automata && (
+        <VirtualKeyboard
+          target={activeField}
+          onInsert={kbInsert}
+          onBackspace={kbBackspace}
+          onEnter={kbEnter}
+          onAnalyze={handleParse}
+          loading={loading}
+        />
+      )}
     </div>
   );
 }
