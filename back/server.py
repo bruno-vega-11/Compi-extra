@@ -34,7 +34,7 @@ from parsers.slr1 import SLR1Parser
 from parsers.lr0 import LR0Parser
 from parsers.lr1 import LR1Parser
 from parsers.lalr1 import LALR1Parser
-
+from parsers.lr1_automata import grammar_to_lr1_automata 
 # ──────────────────────────────────────────────────────────────────────────── #
 # App
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -160,10 +160,6 @@ def grammar_info(request: GrammarRequest):
 
 @app.post("/grammar/automata/all")
 def grammar_automata_all(request: GrammarRequest):
-    """
-    Construye y devuelve todos los autómatas disponibles para la gramática dada.
-    Esto alimenta la vista gráfica del frontend de una sola vez.
-    """
     grammar = build_grammar(request.grammar_text)
     
     # 1. LR(0) NFA / DFA
@@ -172,30 +168,26 @@ def grammar_automata_all(request: GrammarRequest):
     except Exception:
         lr0_automata = {"afn": None, "afd": None}
 
-    # 2. LR(1) Automaton
-    lr1_data = None
+    # 2. LR(1) + LALR(1) + LR(1) NFA
+    lr1_afn_data = None
+    lr1_data     = None
+    lalr1_data   = None
     try:
-        lr1_parser = LR1Parser(grammar)
-        lr1_data = _format_automata(lr1_parser, is_lalr=False)
+        lr1_automata = grammar_to_lr1_automata(grammar)
+        lr1_afn_data = lr1_automata.get("lr1_afn")
+        lr1_data     = lr1_automata.get("lr1")
+        lalr1_data   = lr1_automata.get("lalr1")
     except Exception:
-        pass
-
-    # 3. LALR(1) Automaton
-    lalr1_data = None
-    try:
-        lalr1_parser = LALR1Parser(grammar)
-        lalr1_data = _format_automata(lalr1_parser, is_lalr=True)
-    except Exception:
-        pass
+        import traceback
+        traceback.print_exc()
 
     return {
-        "afn": lr0_automata.get("afn"),
-        "afd": lr0_automata.get("afd"),
-        "lr1_afn": None, # Actualmente no estamos generando NFA explícito para LR(1)
-        "lr1": lr1_data,
-        "lalr1": lalr1_data
+        "afn":    lr0_automata.get("afn"),
+        "afd":    lr0_automata.get("afd"),
+        "lr1_afn": lr1_afn_data,
+        "lr1":    lr1_data,
+        "lalr1":  lalr1_data,
     }
-
 
 # ──────────────────────────────────────────────────────────────────────────── #
 # Endpoints de Parseo
@@ -258,16 +250,18 @@ def parse_slr1(request: ParseRequest):
     try:
         parser = SLR1Parser(grammar)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=400, detail=f"Error al construir el parser: {e}")
-        
-    result = parser.parse(request.input_string)
     
+    result = parser.parse(request.input_string)
+    import traceback
+    print("RESULT:", result)  # ← agrega esto
     return {
         "method":  "slr1",
         "grammar": grammar.to_dict(),
         "result":  _result_to_dict(result),
     }
-
 
 @app.post("/parse/lalr1")
 def parse_lalr1(request: ParseRequest):

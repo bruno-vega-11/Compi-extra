@@ -4,7 +4,18 @@ from typing import Optional
 
 from grammar.grammar import Grammar, EPSILON as EPS
 
-afn_EPSILON = "ε"   
+afn_EPSILON = "ε"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Helpers
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _norm_rhs(rhs) -> tuple:
+    """Normaliza epsilon en cualquier forma → tupla vacía."""
+    if rhs in ([], [EPS], ['ε'], (EPS,), ('ε',)):
+        return ()
+    return tuple(rhs)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -42,22 +53,21 @@ class Item:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build_afn(aug_grammar: Grammar) -> dict:
-    # AFN 
     nts = aug_grammar.non_terminals
 
     # Generar todos los items posibles
     all_items: list[Item] = []
     for lhs, prods in aug_grammar.productions.items():
         for rhs in prods:
-            rhs_t = tuple(rhs)
+            rhs_t = _norm_rhs(rhs)
             for dot in range(len(rhs_t) + 1):
                 all_items.append(Item(lhs, rhs_t, dot))
 
     item_id: dict[Item, str] = {item: f"n{i}" for i, item in enumerate(all_items)}
 
     # Estado inicial: S' → • S
-    start_sym = aug_grammar.start_symbol
-    start_rhs = tuple(aug_grammar.productions[start_sym][0])
+    start_sym  = aug_grammar.start_symbol
+    start_rhs  = _norm_rhs(aug_grammar.productions[start_sym][0])
     start_item = Item(start_sym, start_rhs, 0)
 
     # Nodos
@@ -99,7 +109,7 @@ def build_afn(aug_grammar: Grammar) -> dict:
         B = item.next_symbol
         if B and B in nts:
             for rhs in aug_grammar.productions.get(B, []):
-                target = Item(B, tuple(rhs), 0)
+                target = Item(B, _norm_rhs(rhs), 0)
                 if target in item_id:
                     epsilon_transitions.append({
                         "from":   item_id[item],
@@ -143,33 +153,29 @@ def epsilon_closure(afn_ids: set[str], eps_trans: list[dict]) -> frozenset[str]:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build_afd(afn: dict) -> dict:
-    """
-    Convierte el AFN en AFD por subconjuntos.
-    Cada estado del AFD agrupa los items de su clausura ε.
-    """
+    """Convierte el AFN en AFD por subconjuntos."""
     # Índice de transiciones reales
     real_index: dict[tuple[str, str], list[str]] = {}
     for t in afn["transitions"]:
         real_index.setdefault((t["from"], t["symbol"]), []).append(t["to"])
 
     # Lookup de info de nodos AFN
-    afn_info: dict[str, dict] = {s["id"]: s for s in afn["states"]}
-    afn_accept: set[str] = set(afn["accept_states"])
+    afn_info: dict[str, dict]   = {s["id"]: s for s in afn["states"]}
+    afn_accept: set[str]        = set(afn["accept_states"])
 
     initial = epsilon_closure({afn["start_state"]}, afn["epsilon_transitions"])
 
-    afd_states: list[dict] = []
+    afd_states:      list[dict] = []
     afd_transitions: list[dict] = []
-    afd_accept: list[str] = []
+    afd_accept:      list[str]  = []
 
     subset_to_id: dict[frozenset[str], str] = {initial: "d0"}
     worklist = [initial]
 
     while worklist:
         subset = worklist.pop(0)
-        did = subset_to_id[subset]
+        did    = subset_to_id[subset]
 
-        # Items en este estado AFD
         items = sorted(
             [afn_info[nid] for nid in subset],
             key=lambda x: x["label"]
@@ -179,12 +185,12 @@ def build_afd(afn: dict) -> dict:
         is_start  = (did == "d0")
 
         afd_states.append({
-            "id":        did,
-            "label":     f"I{did[1:]}",       
-            "items":     items,               
+            "id":         did,
+            "label":      f"I{did[1:]}",
+            "items":      items,
             "afn_states": sorted(subset),
-            "is_accept": is_accept,
-            "is_start":  is_start,
+            "is_accept":  is_accept,
+            "is_start":   is_start,
         })
 
         if is_accept:
@@ -232,4 +238,3 @@ def grammar_to_automata(grammar: Grammar) -> dict:
     afn = build_afn(aug)
     afd = build_afd(afn)
     return {"afn": afn, "afd": afd}
-

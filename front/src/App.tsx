@@ -1095,9 +1095,9 @@ function AutomataView({
                     const toLabel   = automata.lr1_afn.states.find(s => s.id === t.to)?.label   ?? t.to;
                     return (
                       <div key={i} className="text-[10px] font-mono">
-                        <span className="text-zinc-400 truncate max-w-[120px] inline-block align-bottom">[{fromLabel}]</span>
+                        <span className="text-zinc-400 truncate max-w-30 inline-block align-bottom">[{fromLabel}]</span>
                         <span className="text-yellow-400 mx-1">─{t.symbol}→</span>
-                        <span className="text-zinc-400 truncate max-w-[120px] inline-block align-bottom">[{toLabel}]</span>
+                        <span className="text-zinc-400 truncate max-w-30 inline-block align-bottom">[{toLabel}]</span>
                       </div>
                     );
                   })}
@@ -1113,9 +1113,9 @@ function AutomataView({
                     const toLabel   = automata.lr1_afn.states.find(s => s.id === t.to)?.label   ?? t.to;
                     return (
                       <div key={i} className="text-[10px] font-mono">
-                        <span className="text-zinc-500 truncate max-w-[120px] inline-block align-bottom">[{fromLabel}]</span>
+                        <span className="text-zinc-500 truncate max-w-30 inline-block align-bottom">[{fromLabel}]</span>
                         <span className="text-purple-400 mx-1">─ε→</span>
-                        <span className="text-zinc-500 truncate max-w-[120px] inline-block align-bottom">[{toLabel}]</span>
+                        <span className="text-zinc-500 truncate max-w-30 inline-block align-bottom">[{toLabel}]</span>
                       </div>
                     );
                   })}

@@ -38,9 +38,15 @@ class Item:
 # Autómata LR(0)
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _norm_rhs(rhs) -> tuple:
+    """Normaliza una rhs: epsilon en cualquier forma → tupla vacía."""
+    if rhs in ([], [EPSILON], ['ε'], (EPSILON,), ('ε',)):
+        return ()
+    return tuple(rhs)
+
+
 class LR0Automaton:
-    #Conjuntos de items LR + transiciones
-    
+
     def __init__(self, grammar: Grammar):
         self.grammar = grammar
         self.states: list[frozenset[Item]] = []
@@ -57,7 +63,7 @@ class LR0Automaton:
                 B = item.next_symbol
                 if B and B in self.grammar.non_terminals:
                     for rhs in self.grammar.productions.get(B, []):
-                        new_item = Item(B, tuple(rhs), 0)
+                        new_item = Item(B, _norm_rhs(rhs), 0)
                         if new_item not in closure:
                             to_add.add(new_item)
                             changed = True
@@ -65,13 +71,12 @@ class LR0Automaton:
         return frozenset(closure)
 
     def _goto(self, state: frozenset[Item], symbol: str) -> frozenset[Item]:
-        """GOTO(I, X): avanza el punto sobre X y calcula clausura."""
         moved = {item.advance() for item in state if item.next_symbol == symbol}
         return self._closure(moved) if moved else frozenset()
 
     def _build(self):
         start = self.grammar.start_symbol
-        start_rhs = tuple(self.grammar.productions[start][0])
+        start_rhs = _norm_rhs(self.grammar.productions[start][0])
         initial = self._closure({Item(start, start_rhs, 0)})
 
         self.states = [initial]
@@ -131,10 +136,9 @@ def build_slr1_table(aug_grammar: Grammar, orig_grammar: Grammar, automaton: LR0
                     if "acc" not in table.action[(i, "$")]:
                         table.action[(i, "$")].append("acc")
                 else:
-                    rhs = list(item.rhs)
                     prod_idx = next(
                         idx for idx, (lhs, r) in enumerate(prods_list)
-                        if lhs == item.lhs and r == rhs
+                        if lhs == item.lhs and _norm_rhs(r) == item.rhs
                     )
                     entry = f"r{prod_idx}"
                     for term in orig_grammar.follow(item.lhs):
@@ -157,7 +161,7 @@ def build_slr1_table(aug_grammar: Grammar, orig_grammar: Grammar, automaton: LR0
 @dataclass
 class ParseStep:
     step_number: int
-    action: str       
+    action: str
     description: str
     stack: list
     remaining_input: list
@@ -165,10 +169,10 @@ class ParseStep:
 
     def to_dict(self) -> dict:
         return {
-            "step_number":    self.step_number,
-            "action":         self.action,
-            "description":    self.description,
-            "stack":          self.stack,
+            "step_number":     self.step_number,
+            "action":          self.action,
+            "description":     self.description,
+            "stack":           self.stack,
             "remaining_input": self.remaining_input,
             "production_used": self.production_used,
         }
@@ -178,10 +182,10 @@ class ParseStep:
 class ParseResult:
     is_valid: bool
     steps: list
-    action_table: dict   
-    goto_table: dict    
-    first: dict          
-    follow: dict         
+    action_table: dict
+    goto_table: dict
+    first: dict
+    follow: dict
     states: list
     conflicts: list
     error_message: Optional[str]
@@ -211,22 +215,12 @@ class ParseResult:
 class SLR1Parser:
 
     def __init__(self, grammar: Grammar):
-        """
-        Recibe una Grammar ya construida (via Grammar.from_text() o manual).
-        Internamente la aumenta, construye el autómata y la tabla.
-        """
         self.orig_grammar = grammar
         self.aug_grammar  = grammar.augment()
         self.automaton    = LR0Automaton(self.aug_grammar)
         self.table        = build_slr1_table(self.aug_grammar, self.orig_grammar, self.automaton)
 
-    # ── Punto de entrada ─────────────────────────────────────────────────────
-
     def parse(self, input_string: str) -> ParseResult:
-        """
-        Analiza una cadena de tokens separados por espacios.
-        Ejemplo: "id + id * id"
-        """
         tokens = input_string.strip().split() if input_string.strip() else []
         tokens_eof = tokens + ["$"]
 
@@ -286,13 +280,13 @@ class SLR1Parser:
                 pos += 1
 
             elif action.startswith("r"):
-                prod_idx = int(action[1:])
-                lhs, rhs = prods_list[prod_idx]
-                prod_str = f"{lhs} → {' '.join(rhs) if rhs else EPSILON}"
+                prod_idx  = int(action[1:])
+                lhs, rhs  = prods_list[prod_idx]
+                rhs_norm  = _norm_rhs(rhs)
+                prod_str  = f"{lhs} → {' '.join(rhs) if rhs_norm else EPSILON}"
 
-                if rhs and rhs != [EPSILON]:
-                    for _ in rhs:
-                        stack.pop()
+                for _ in rhs_norm:
+                    stack.pop()
 
                 goto_state = self.table.goto.get((stack[-1], lhs))
                 if goto_state is None:
@@ -333,21 +327,11 @@ class SLR1Parser:
         )
 
     def _format_tables(self) -> tuple[dict, dict]:
-        """
-        Convierte ACTION y GOTO a formato JSON-serializable para el frontend.
-
-        action_table:
-          { terminals: [...], rows: [{ state, "$": "acc", "(": "s2", ... }], productions: [...] }
-
-        goto_table:
-          { nonterminals: [...], rows: [{ state, "E": "1", "T": "4", ... }] }
-        """
         prods_list   = self.aug_grammar.productions_list()
         num_states   = len(self.automaton.states)
         terminals    = sorted(self.aug_grammar.terminals | {"$"})
-        nonterminals = list(self.orig_grammar.productions.keys())  
+        nonterminals = list(self.orig_grammar.productions.keys())
 
-        # ACTION
         action_rows = []
         for i in range(num_states):
             row: dict = {"state": i}
@@ -356,7 +340,7 @@ class SLR1Parser:
             action_rows.append(row)
 
         productions_legend = [
-            {"index": idx, "production": f"{lhs} → {' '.join(rhs) if rhs else EPSILON}"}
+            {"index": idx, "production": f"{lhs} → {' '.join(rhs) if _norm_rhs(rhs) else EPSILON}"}
             for idx, (lhs, rhs) in enumerate(prods_list)
         ]
 
@@ -366,7 +350,6 @@ class SLR1Parser:
             "productions": productions_legend,
         }
 
-        # GOTO
         goto_rows = []
         for i in range(num_states):
             row = {"state": i}
@@ -385,13 +368,13 @@ class SLR1Parser:
     def _build_error_msg(self, token: str, pos: int, tokens: list) -> str:
         context = tokens[max(0, pos - 2): pos]
         msg  = f"Error de sintaxis en la posición {pos + 1}.\n"
-        msg += f"Token problematico: '{token}'.\n"
+        msg += f"Token problemático: '{token}'.\n"
         if context:
             msg += f"Tokens anteriores: {' '.join(context)}.\n"
         msg += (
-            "\nEl analizador SLR(1) no encontró ninguna acción valida "
+            "\nEl analizador SLR(1) no encontró ninguna acción válida "
             "para el token actual en el estado actual. "
-            "Verifica que la cadena pertenezca al lenguaje definido por la gramatica."
+            "Verifica que la cadena pertenezca al lenguaje definido por la gramática."
         )
         return msg
 
@@ -408,4 +391,3 @@ class SLR1Parser:
                 },
             })
         return result
-
