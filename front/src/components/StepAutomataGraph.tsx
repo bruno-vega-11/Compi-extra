@@ -1,23 +1,47 @@
-import { useState, useMemo } from "react";
-import type { GraphNode, GraphLink } from "../types";
+import { useState, useRef, useMemo } from "react";
+import type { GraphNode, GraphLink, ConstructionStep } from "../types";
 
 const NW = 92, NH = 58;
 
-// ── CAMBIO 1: Añadidos zoom, panX y panY a las Props ──
 interface Props {
   data: { nodes: GraphNode[]; links: GraphLink[] };
-  onNodeClick?: (node: GraphNode) => void;
-  zoom: number;
-  panX: number;
-  panY: number;
+  currentStep: number;
+  steps: ConstructionStep[];
+  onNodeClick?: (node: any) => void;
 }
 
-export function StaticAutomataGraph({ data, onNodeClick, zoom, panX, panY }: Props) {
-  // Conservamos el estado 'selected' para resaltar nodos al hacerles clic en modo exploración
-  const [selected, setSelected] = useState<string | null>(null);
+export function StepAutomataGraph({ data, currentStep, steps }: Props) {
+  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
+  const isPanning = useRef(false);
+  const didPan    = useRef(false);
+  const lastMouse = useRef({ x: 0, y: 0 });
 
-  // ── CAMBIO 2: Se eliminaron los estados locales de transform, isPanning, didPan y las refs de mouse ──
+  // ── Calcular qué nodos y enlaces están activos hasta el paso actual ─────────
+  const { activeNodes, activeLinks, currentNode, currentLink } = useMemo(() => {
+    const activeNodes = new Set<string>();
+    const activeLinks = new Set<string>();
+    let currentNode: string | null = null;
+    let currentLink: string | null = null;
 
+    for (const step of steps) {
+      if (step.step > currentStep) break;
+      if (step.type === "add_state" && step.state_id) {
+        activeNodes.add(step.state_id);
+        if (step.step === currentStep) currentNode = step.state_id;
+      }
+      if (step.type === "add_transition" && step.from && step.to) {
+        activeLinks.add(`${step.from}-${step.to}-${step.symbol}`);
+        if (step.step === currentStep) currentLink = `${step.from}-${step.to}-${step.symbol}`;
+      }
+      if (step.type === "compute_goto" && step.from) {
+        if (step.step === currentStep) currentNode = step.from;
+      }
+    }
+
+    return { activeNodes, activeLinks, currentNode, currentLink };
+  }, [currentStep, steps]);
+
+  // ── Layout (igual que StaticAutomataGraph) ──────────────────────────────────
   const layout = useMemo(() => {
     const { nodes, links } = data;
     const adj: Record<string, string[]> = {};
@@ -60,44 +84,42 @@ export function StaticAutomataGraph({ data, onNodeClick, zoom, panX, panY }: Pro
     return { pos, svgH: Math.max(maxY, 200) };
   }, [data]);
 
-  const outTargets = useMemo(() => {
-    if (!selected) return new Set<string>();
-    return new Set(data.links.filter(l => l.source === selected).map(l => l.target));
-  }, [selected, data.links]);
-
-  // ── CAMBIO 3: Se eliminaron por completo las funciones onWheel, onMouseDown, onMouseMove y onMouseUp ──
-
-  function nodeOpacity(id: string) {
-    if (!selected) return 1;
-    return id === selected || outTargets.has(id) ? 1 : 0.15;
+  function onWheel(e: React.WheelEvent<SVGSVGElement>) {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.12 : 0.89;
+    setTransform(t => ({ ...t, scale: Math.min(4, Math.max(0.2, t.scale * factor)) }));
   }
 
-  function edgeOpacity(source: string) {
-    if (!selected) return 0.8;
-    return source === selected ? 1 : 0.08;
+  function onMouseDown(e: React.MouseEvent<SVGSVGElement>) {
+    if (e.button !== 0) return;
+    isPanning.current = true;
+    didPan.current = false;
+    lastMouse.current = { x: e.clientX, y: e.clientY };
+  }
+
+  function onMouseMove(e: React.MouseEvent<SVGSVGElement>) {
+    if (!isPanning.current) return;
+    const dx = e.clientX - lastMouse.current.x;
+    const dy = e.clientY - lastMouse.current.y;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) didPan.current = true;
+    lastMouse.current = { x: e.clientX, y: e.clientY };
+    setTransform(t => ({ ...t, x: t.x + dx, y: t.y + dy }));
+  }
+
+  function onMouseUp() { isPanning.current = false; }
+
+  function nodeOpacity(id: string) {
+    if (!activeNodes.has(id)) return 0.08;
+    if (id === currentNode) return 1;
+    return 0.7;
   }
 
   function nodeStroke(n: GraphNode) {
-    if (selected === n.id) return { color: "#818cf8", width: 2 };
-    if (outTargets.has(n.id)) return { color: "#f59e0b", width: 1.5 };
+    if (n.id === currentNode) return { color: "#f59e0b", width: 2 };
+    if (!activeNodes.has(n.id)) return { color: "#1e293b", width: 0.5 };
     if (n.isStart)  return { color: "#3b82f6", width: 0.5 };
     if (n.isAccept) return { color: "#22c55e", width: 0.5 };
     return { color: "#334155", width: 0.5 };
-  }
-
-  function edgeStroke(source: string, isEps: boolean) {
-    if (!selected) return isEps ? "#7c3aed" : "#475569";
-    return source === selected ? "#818cf8" : "#374151";
-  }
-
-  function edgeMarker(source: string, isEps: boolean) {
-    if (!selected) return isEps ? "url(#agm-eps)" : "url(#agm-normal)";
-    return source === selected ? "url(#agm-hi)" : "url(#agm-dim)";
-  }
-
-  function edgeStrokeW(source: string) {
-    if (!selected) return 1;
-    return source === selected ? 1.8 : 0.8;
   }
 
   function buildPath(l: GraphLink): { d: string; lx: number; ly: number } {
@@ -141,25 +163,44 @@ export function StaticAutomataGraph({ data, onNodeClick, zoom, panX, panY }: Pro
     return { d, lx: mx, ly: my - 10 };
   }
 
+  function linkKey(l: GraphLink) {
+    return `${l.source}-${l.target}-${l.symbol}`;
+  }
+
+  function linkOpacity(l: GraphLink) {
+    const key = linkKey(l);
+    if (!activeLinks.has(key)) return 0.05;
+    if (key === currentLink) return 1;
+    return 0.6;
+  }
+
+  function linkColor(l: GraphLink) {
+    const key = linkKey(l);
+    const isEps = l.type === "epsilon";
+    if (key === currentLink) return "#f59e0b";
+    if (!activeLinks.has(key)) return isEps ? "#3b1f6b" : "#1e293b";
+    return isEps ? "#7c3aed" : "#475569";
+  }
+
   const { pos, svgH } = layout;
-  const svgW = 680;
 
   return (
     <svg
       width="100%"
-      height="100%"
-      viewBox={`0 0 ${svgW} ${svgH}`}
-      className="select-none text-zinc-100"
-      style={{ display: "block" }}
-      // Al hacer clic en el fondo limpio del SVG, deseleccionamos el nodo activo de forma directa
-      onClick={() => setSelected(null)}
+      viewBox={`0 0 680 ${svgH}`}
+      style={{ display: "block", cursor: "grab", userSelect: "none" }}
+      onWheel={onWheel}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+      onMouseLeave={onMouseUp}
     >
       <defs>
         {([
-          { id: "agm-normal", color: "#64748b" },
-          { id: "agm-hi",     color: "#818cf8" },
-          { id: "agm-dim",    color: "#374151" },
-          { id: "agm-eps",    color: "#a78bfa" },
+          { id: "step-normal", color: "#64748b" },
+          { id: "step-active", color: "#f59e0b" },
+          { id: "step-dim",    color: "#1e293b" },
+          { id: "step-eps",    color: "#7c3aed" },
         ] as const).map(({ id, color }) => (
           <marker key={id} id={id} viewBox="0 0 10 10" refX="8" refY="5"
                   markerWidth="5" markerHeight="5" orient="auto">
@@ -169,26 +210,26 @@ export function StaticAutomataGraph({ data, onNodeClick, zoom, panX, panY }: Pro
         ))}
       </defs>
 
-      {/* ── CAMBIO 4: El contenedor general ahora obedece únicamente a las Props del Paneo y del Zoom ── */}
-      <g 
-          transform={`translate(${-panX},${panY}) scale(${zoom})`} 
-          style={{ transformOrigin: "340px 120px" }} 
-          className="pointer-events-auto"
-        >
+      <g transform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
+        {/* Edges */}
         <g>
           {data.links.map((l, i) => {
             const isEps = l.type === "epsilon";
             const { d, lx, ly } = buildPath(l);
             if (!d) return null;
+            const key   = linkKey(l);
+            const isAct = key === currentLink;
+            const marker = isAct ? "url(#step-active)" : isEps ? "url(#step-eps)" : "url(#step-normal)";
+
             return (
-              <g key={i} style={{ opacity: edgeOpacity(l.source) }}>
+              <g key={i} style={{ opacity: linkOpacity(l), transition: "opacity 0.3s" }}>
                 <path
                   d={d}
                   fill="none"
-                  stroke={edgeStroke(l.source, isEps)}
-                  strokeWidth={edgeStrokeW(l.source)}
+                  stroke={linkColor(l)}
+                  strokeWidth={isAct ? 2 : 1}
                   strokeDasharray={isEps ? "4 3" : undefined}
-                  markerEnd={edgeMarker(l.source, isEps)}
+                  markerEnd={marker}
                 />
                 <text
                   x={lx} y={ly}
@@ -196,7 +237,7 @@ export function StaticAutomataGraph({ data, onNodeClick, zoom, panX, panY }: Pro
                   dominantBaseline="central"
                   fontSize="10"
                   fontFamily="monospace"
-                  fill={selected && l.source === selected ? "#c4b5fd" : isEps ? "#7c3aed" : "#64748b"}
+                  fill={isAct ? "#fbbf24" : isEps ? "#7c3aed" : "#64748b"}
                   pointerEvents="none"
                 >
                   {l.symbol}
@@ -206,29 +247,39 @@ export function StaticAutomataGraph({ data, onNodeClick, zoom, panX, panY }: Pro
           })}
         </g>
 
+        {/* Nodes */}
         <g>
           {data.nodes.map(n => {
             const p = pos[n.id];
             if (!p) return null;
             const { color: sc, width: sw } = nodeStroke(n);
-            const fill     = n.isStart ? "#1e3a5f" : n.isAccept ? "#1a3a2a" : "#1e293b";
-            const lblColor = n.isStart ? "#93c5fd" : n.isAccept ? "#86efac" : "#cbd5e1";
+            const isActive = activeNodes.has(n.id);
+            const isCurrent = n.id === currentNode;
+            const fill = isCurrent ? "#2d2005"
+              : !isActive ? "#0f172a"
+              : n.isStart ? "#1e3a5f"
+              : n.isAccept ? "#1a3a2a"
+              : "#1e293b";
+            const lblColor = isCurrent ? "#fbbf24"
+              : !isActive ? "#1e293b"
+              : n.isStart ? "#93c5fd"
+              : n.isAccept ? "#86efac"
+              : "#cbd5e1";
+
             return (
               <g
                 key={n.id}
                 transform={`translate(${p.x},${p.y})`}
-                style={{ cursor: "pointer", opacity: nodeOpacity(n.id) }}
-                onClick={e => {
-                  e.stopPropagation();
-                  // Como ya no hay arrastres interrumpiendo, cambiamos la selección e invocamos la prop inmediatamente
-                  setSelected(prev => prev === n.id ? null : n.id);
-                  onNodeClick?.(n); 
-                }}
+                style={{ opacity: nodeOpacity(n.id), transition: "opacity 0.3s", cursor: "default" }}
               >
                 <rect width={NW} height={NH} rx={4} fill={fill} stroke={sc} strokeWidth={sw} />
-                {n.isAccept && (
+                {n.isAccept && isActive && (
                   <rect x={3} y={3} width={NW - 6} height={NH - 6} rx={2}
                         fill="none" stroke="#22c55e" strokeWidth={0.5} />
+                )}
+                {isCurrent && (
+                  <rect x={-2} y={-2} width={NW + 4} height={NH + 4} rx={6}
+                        fill="none" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 2" />
                 )}
                 <text
                   x={NW / 2}
@@ -238,12 +289,12 @@ export function StaticAutomataGraph({ data, onNodeClick, zoom, panX, panY }: Pro
                   fontSize="12"
                   fontWeight="500"
                   fontFamily="monospace"
-                  fill={selected === n.id ? "#a5b4fc" : lblColor}
+                  fill={lblColor}
                   pointerEvents="none"
                 >
                   {n.label}
                 </text>
-                {n.items && n.items.length > 0 && (
+                {n.items && n.items.length > 0 && isActive && (
                   <text
                     x={NW / 2} y={NH / 2 + 9}
                     textAnchor="middle"

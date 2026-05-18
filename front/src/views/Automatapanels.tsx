@@ -1,5 +1,15 @@
 import type { AutomataResponse, AutomataView } from "../types";
 
+// Helper: deriva transiciones desde connections de cada estado
+function getTransitions(states: any[], fromId: string) {
+  const state = states.find(s => s.id === fromId);
+  return (state?.connections ?? []).map((c: any) => ({
+    from: fromId,
+    to: c.to,
+    symbol: c.symbol,
+  }));
+}
+
 // ─── LR(0) DFA Panel ─────────────────────────────────────────────────────────
 
 export function DFAPanel({
@@ -16,9 +26,9 @@ export function DFAPanel({
     <>
       <p className="text-[10px] text-zinc-500 uppercase tracking-widest shrink-0">Estados LR(0) DFA</p>
       <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
-        {dfa.states.map((state) => {
+        {(dfa.states ?? []).map((state) => {
           const isSelected = expandedState === state.id;
-          const trans = dfa.transitions.filter(t => t.from === state.id);
+          const trans = getTransitions(dfa.states, state.id);
           return (
             <div
               key={state.id}
@@ -37,12 +47,12 @@ export function DFAPanel({
               </div>
               {trans.length > 0 && (
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 mb-1">
-                  {trans.map((t, i) => (
+                  {trans.map((t: { from: string; to: string; symbol: string }, i: number) => (
                     <span key={i} className="text-[10px] font-mono">
                       <span className="text-yellow-400">{t.symbol}</span>
                       <span className="text-zinc-600">→</span>
                       <span className="text-purple-400">
-                        {dfa.states.find(s => s.id === t.to)?.label ?? t.to}
+                        {dfa.states.find((s: any) => s.id === t.to)?.label ?? t.to}
                       </span>
                     </span>
                   ))}
@@ -50,7 +60,7 @@ export function DFAPanel({
               )}
               {isSelected && (
                 <div className="mt-2 pt-2 border-t border-zinc-800 flex flex-col gap-0.5">
-                  {state.items.map((item, i) => (
+                  {(state.items ?? []).map((item: any, i: number) => (
                     <div key={i} className="text-[10px] font-mono text-zinc-300 leading-relaxed">
                       {item.label}
                     </div>
@@ -82,16 +92,23 @@ export function NFAPanel({
   const isLR1NFA = view === "lr1_afn";
   const nfa = isLR1NFA ? automata.lr1_afn : automata.afn;
 
-  const lookup = (id: string) => nfa.states.find(s => s.id === id)?.label ?? id;
+  if (!nfa) return <div className="text-xs text-red-400 p-4">No hay datos del AFN.</div>;
+
+  const states            = nfa.states            ?? [];
+  const transitions       = nfa.transitions       ?? [];
+  const epsilonTransitions = nfa.epsilon_transitions ?? [];
+  const acceptStates      = nfa.accept_states     ?? [];
+
+  const lookup = (id: string) => states.find((s: any) => s.id === id)?.label ?? id;
 
   return (
     <div className="flex-1 overflow-y-auto flex flex-col gap-4 pr-1">
       <div>
         <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">
-          Transiciones reales ({nfa.transitions.length})
+          Transiciones reales ({transitions.length})
         </p>
         <div className="flex flex-col gap-0.5">
-          {nfa.transitions.map((t, i) => (
+          {transitions.map((t: any, i: number) => (
             <div key={i} className="text-[10px] font-mono">
               <span className="text-zinc-400 truncate max-w-30 inline-block align-bottom">[{lookup(t.from)}]</span>
               <span className="text-yellow-400 mx-1">─{t.symbol}→</span>
@@ -102,10 +119,10 @@ export function NFAPanel({
       </div>
       <div>
         <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">
-          Transiciones ε ({nfa.epsilon_transitions.length})
+          Transiciones ε ({epsilonTransitions.length})
         </p>
         <div className="flex flex-col gap-0.5">
-          {nfa.epsilon_transitions.map((t, i) => (
+          {epsilonTransitions.map((t: any, i: number) => (
             <div key={i} className="text-[10px] font-mono">
               <span className="text-zinc-500 truncate max-w-30 inline-block align-bottom">[{lookup(t.from)}]</span>
               <span className="text-purple-400 mx-1">─ε→</span>
@@ -116,11 +133,11 @@ export function NFAPanel({
       </div>
       <div>
         <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">
-          Items de aceptación ({nfa.accept_states.length})
+          Items de aceptación ({acceptStates.length})
         </p>
         <div className="flex flex-wrap gap-1.5">
-          {nfa.accept_states.map(id => {
-            const state = nfa.states.find(s => s.id === id);
+          {acceptStates.map((id: string) => {
+            const state = states.find((s: any) => s.id === id);
             return (
               <span key={id} className="text-[10px] bg-yellow-400/10 border border-yellow-400/30 text-yellow-400 px-2 py-0.5 rounded font-mono">
                 {state?.label ?? id}
@@ -153,15 +170,17 @@ export function LR1Panel({
   setExpandedState: (id: string | null) => void;
 }) {
   const lr1 = automata.lr1;
+  if (!lr1) return <div className="text-xs text-red-400 p-4">No hay datos LR(1).</div>;
+
   return (
     <>
       <p className="text-[10px] text-zinc-500 uppercase tracking-widest shrink-0">
-        Estados LR(1) — {lr1.states.length} estados
+        Estados LR(1) — {(lr1.states ?? []).length} estados
       </p>
       <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
-        {lr1.states.map((state) => {
+        {(lr1.states ?? []).map((state: any) => {
           const isSelected = expandedState === state.id;
-          const trans = lr1.transitions.filter(t => t.from === state.id);
+          const trans = getTransitions(lr1.states, state.id);
           return (
             <div
               key={state.id}
@@ -176,17 +195,17 @@ export function LR1Panel({
                 }`}>{state.label}</span>
                 {state.is_start  && <span className="text-[10px] text-green-600 border border-green-900 rounded px-1">inicio</span>}
                 {state.is_accept && <span className="text-[10px] text-yellow-600 border border-yellow-900 rounded px-1">accept</span>}
-                <span className="text-[10px] text-zinc-600 ml-auto">{state.items.length} items</span>
+                <span className="text-[10px] text-zinc-600 ml-auto">{(state.items ?? []).length} items</span>
                 <span className="text-[10px] text-zinc-600">{isSelected ? "▲" : "▼"}</span>
               </div>
               {trans.length > 0 && (
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 mb-1">
-                  {trans.map((t, i) => (
+                  {trans.map((t: any, i: number) => (
                     <span key={i} className="text-[10px] font-mono">
                       <span className="text-yellow-400">{t.symbol}</span>
                       <span className="text-zinc-600">→</span>
                       <span className="text-purple-400">
-                        {lr1.states.find(s => s.id === t.to)?.label ?? t.to}
+                        {(lr1.states ?? []).find((s: any) => s.id === t.to)?.label ?? t.to}
                       </span>
                     </span>
                   ))}
@@ -194,7 +213,7 @@ export function LR1Panel({
               )}
               {isSelected && (
                 <div className="mt-2 pt-2 border-t border-zinc-800 flex flex-col gap-0.5">
-                  {state.items.map((item, i) => {
+                  {(state.items ?? []).map((item: any, i: number) => {
                     const commaIdx = item.label.lastIndexOf(",");
                     const itemPart = commaIdx >= 0 ? item.label.slice(0, commaIdx) : item.label;
                     const laPart   = commaIdx >= 0 ? item.label.slice(commaIdx) : "";
@@ -232,15 +251,17 @@ export function LALR1Panel({
   setExpandedState: (id: string | null) => void;
 }) {
   const lalr1 = automata.lalr1;
+  if (!lalr1) return <div className="text-xs text-red-400 p-4">No hay datos LALR(1).</div>;
+
   return (
     <>
       <p className="text-[10px] text-zinc-500 uppercase tracking-widest shrink-0">
-        Estados LALR(1) — {lalr1.states.length} estados
+        Estados LALR(1) — {(lalr1.states ?? []).length} estados
       </p>
       <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
-        {lalr1.states.map((state) => {
+        {(lalr1.states ?? []).map((state: any) => {
           const isSelected = expandedState === state.id;
-          const trans = lalr1.transitions.filter(t => t.from === state.id);
+          const trans = getTransitions(lalr1.states, state.id);
           return (
             <div
               key={state.id}
@@ -255,7 +276,7 @@ export function LALR1Panel({
                 }`}>{state.label}</span>
                 {state.is_start  && <span className="text-[10px] text-green-600 border border-green-900 rounded px-1">inicio</span>}
                 {state.is_accept && <span className="text-[10px] text-yellow-600 border border-yellow-900 rounded px-1">accept</span>}
-                {state.lr1_ids?.length > 1 && (
+                {(state.lr1_ids?.length ?? 0) > 1 && (
                   <span className="text-[10px] text-zinc-600 border border-zinc-800 rounded px-1">
                     fusiona {state.lr1_ids.length}
                   </span>
@@ -264,12 +285,12 @@ export function LALR1Panel({
               </div>
               {trans.length > 0 && (
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 mb-1">
-                  {trans.map((t, i) => (
+                  {trans.map((t: any, i: number) => (
                     <span key={i} className="text-[10px] font-mono">
                       <span className="text-yellow-400">{t.symbol}</span>
                       <span className="text-zinc-600">→</span>
                       <span className="text-purple-400">
-                        {lalr1.states.find(s => s.id === t.to)?.label ?? t.to}
+                        {(lalr1.states ?? []).find((s: any) => s.id === t.to)?.label ?? t.to}
                       </span>
                     </span>
                   ))}
@@ -282,7 +303,7 @@ export function LALR1Panel({
                       Fusiona: <span className="text-zinc-500">{state.lr1_ids.join(", ")}</span>
                     </div>
                   )}
-                  {state.items.map((item, i) => {
+                  {(state.items ?? []).map((item: any, i: number) => {
                     const commaIdx = item.label.lastIndexOf(",");
                     const itemPart = commaIdx >= 0 ? item.label.slice(0, commaIdx) : item.label;
                     const laPart   = commaIdx >= 0 ? item.label.slice(commaIdx) : "";

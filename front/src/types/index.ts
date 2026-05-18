@@ -3,6 +3,15 @@
 export type ParserMethod = "recursive-descent" | "ll1" | "lr0" | "slr1" | "lalr1" | "lr1";
 export type AutomataView = "afd" | "afn" | "lr1_afn" | "lr1" | "lalr1";
 
+export interface BaseApiResponse {
+  method: string;
+  grammar: GrammarInfo;
+  ai_triggered: boolean;
+  errors: string[];
+  ai_explanation: string | null;
+  ai_fixed: string | null;
+}
+
 // ─── Recursive Descent ────────────────────────────────────────────────────────
 
 export interface RDParseStep {
@@ -23,9 +32,7 @@ export interface RDParseResult {
   total_tokens: number;
 }
 
-export interface RDApiResponse {
-  method: string;
-  grammar: GrammarInfo;
+export interface RDApiResponse extends BaseApiResponse {
   generated_functions?: {
     function_name: string;
     cases: { production: string; triggered_by_tokens: string[] }[];
@@ -55,6 +62,7 @@ export interface GotoTable {
   rows: Record<string, string>[];
 }
 
+// Reemplaza o asegura esta sección en tu types.ts
 export interface LRParseResult {
   is_valid: boolean;
   steps: LRParseStep[];
@@ -67,11 +75,10 @@ export interface LRParseResult {
   error_message: string | null;
   tokens_consumed: number;
   total_tokens: number;
+  parse_tree?: object | null;
 }
 
-export interface LRApiResponse {
-  method: string;
-  grammar: GrammarInfo;
+export interface LRApiResponse extends BaseApiResponse {
   result: LRParseResult;
 }
 
@@ -96,6 +103,7 @@ export interface NFAState {
   lhs: string;
   rhs: string[];
   dot: number;
+  connections?: { to: string; symbol: string; type: "real" | "epsilon" }[];
 }
 
 export interface NFATransition {
@@ -119,6 +127,7 @@ export interface DFAState {
   afn_states: string[];
   is_accept: boolean;
   is_start: boolean;
+  connections?: { to: string; symbol: string }[];
 }
 
 export interface DFATransition {
@@ -153,6 +162,7 @@ export interface LR1State {
   items: LR1Item[];
   is_accept: boolean;
   is_start: boolean;
+  connections?: { to: string; symbol: string }[];
 }
 
 export interface LALR1State {
@@ -162,6 +172,7 @@ export interface LALR1State {
   lr1_ids: string[];
   is_accept: boolean;
   is_start: boolean;
+  connections?: { to: string; symbol: string }[];
 }
 
 export interface LR1Automata {
@@ -190,6 +201,7 @@ export interface LR1NFAState {
   dot: number;
   lookahead: string;
   completed: boolean;
+  connections?: { to: string; symbol: string; type: "real" | "epsilon" }[];
 }
 
 export interface LR1NFAAutomata {
@@ -209,6 +221,7 @@ export interface AutomataResponse {
     epsilon_transitions: NFATransition[];
     start_state: string;
     accept_states: string[];
+    construction_order: ConstructionStep[];
   };
   afd: {
     type: string;
@@ -216,6 +229,7 @@ export interface AutomataResponse {
     transitions: DFATransition[];
     start_state: string;
     accept_states: string[];
+    construction_order: ConstructionStep[];
   };
   lr1_afn: LR1NFAAutomata;
   lr1: LR1Automata;
@@ -246,4 +260,25 @@ export interface TreeNodeType {
   is_terminal: boolean;
   matched_token?: string;
   children?: TreeNodeType[];
+}
+
+// ─── Construction Steps ──────────────────────────────────────────────────────
+
+export interface ConstructionStep {
+  step: number;
+  type: "add_state" | "add_transition" | "compute_goto" | "epsilon_closure";
+  state_id?: string;
+  from?: string;
+  to?: string;
+  symbol?: string;
+  trans_type?: "real" | "epsilon";
+  // is_new_state → transición add_transition (ya existía antes)
+  is_new_state?: boolean;
+  // is_new → epsilon_closure: true cuando el closure genera un estado nuevo
+  is_new?: boolean;
+  items?: string[];
+  is_accept?: boolean;
+  is_start?: boolean;
+  afn_nodes?: string[];
+  description: string;
 }
