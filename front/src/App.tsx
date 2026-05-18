@@ -116,7 +116,7 @@ export default function App() {
     setRdResponse(null);
     setLrResponse(null);
     try {
-      const res = await fetch(`http://localhost:8000/parse/${method}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/parse/${method}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ grammar_text: grammarText, input_string: inputString }),
@@ -139,7 +139,7 @@ export default function App() {
     setAutomataLoading(true);
     setError(null);
     try {
-      const res = await fetch("http://localhost:8000/grammar/automata/all", {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/grammar/automata/all`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ grammar_text: grammarText }),
