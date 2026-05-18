@@ -11,16 +11,12 @@ interface VirtualKeyboardProps {
   loading?: boolean;
 }
 
-// ─── QWERTY rows ──────────────────────────────────────────────────────────────
-
 const ROWS_UPPER = [
   ["1","2","3","4","5","6","7","8","9","0"],
   ["Q","W","E","R","T","Y","U","I","O","P"],
   ["A","S","D","F","G","H","J","K","L"],
   ["Z","X","C","V","B","N","M"],
 ];
-
-// ─── Grammar / special keys ───────────────────────────────────────────────────
 
 const GRAMMAR_KEYS: { label: string; value: string; color?: "cyan"|"purple"|"yellow" }[] = [
   { label: "->",  value: "->",   color: "cyan"   },
@@ -55,21 +51,17 @@ const GRAMMAR_KEYS: { label: string; value: string; color?: "cyan"|"purple"|"yel
   { label: "#",   value: "#"  },
 ];
 
-// ─── Styling helpers ──────────────────────────────────────────────────────────
-
 const COLOR_CLS = {
-  cyan:   "text-cyan-400   border-cyan-800   hover:border-cyan-500   hover:bg-cyan-400/5",
-  purple: "text-purple-400 border-purple-800 hover:border-purple-500 hover:bg-purple-400/5",
-  yellow: "text-yellow-400 border-yellow-800 hover:border-yellow-500 hover:bg-yellow-400/5",
+  cyan:   "text-cyan-400   border-cyan-800   hover:border-cyan-500   hover:bg-cyan-400/10",
+  purple: "text-purple-400 border-purple-800 hover:border-purple-500 hover:bg-purple-400/10",
+  yellow: "text-yellow-400 border-yellow-800 hover:border-yellow-500 hover:bg-yellow-400/10",
 };
-const BASE_KEY = "inline-flex items-center justify-center rounded border bg-zinc-800 font-mono text-xs transition-all active:scale-95 active:bg-zinc-700 cursor-pointer select-none";
+const BASE_KEY = "inline-flex items-center justify-center rounded border bg-zinc-800/80 font-mono text-xs transition-all active:scale-95 active:bg-zinc-700 cursor-pointer select-none";
 const NORMAL   = "text-zinc-300 border-zinc-700 hover:text-green-400 hover:border-green-400/40 hover:bg-green-400/5";
 
 function kc(color?: "cyan"|"purple"|"yellow") {
   return `${BASE_KEY} ${color ? COLOR_CLS[color] : NORMAL}`;
 }
-
-// ─── Component ────────────────────────────────────────────────────────────────
 
 export function VirtualKeyboard({
   target,
@@ -80,11 +72,9 @@ export function VirtualKeyboard({
   loading,
 }: VirtualKeyboardProps) {
   const [shift, setShift] = useState(false);
-  const [section, setSection] = useState<"qwerty"|"grammar">("qwerty");
 
   function pressKey(raw: string) {
     const v = shift ? raw.toUpperCase() : raw.toLowerCase();
-    // Para letras sueltas no añadimos padding; insertAt en App lo maneja
     onInsert(/^[a-zA-Z0-9]$/.test(v) ? v : raw);
     if (shift && /^[a-zA-Z]$/.test(raw)) setShift(false);
   }
@@ -92,122 +82,94 @@ export function VirtualKeyboard({
   return (
     <div className="border-t border-zinc-800 bg-zinc-950 px-5 pt-3 pb-4 select-none">
 
-      {/* Header bar */}
-      <div className="flex items-center gap-3 mb-3">
+      {/* Header */}
+      <div className="mb-3">
         <span className="text-[10px] text-zinc-600 tracking-widest uppercase">
           teclado →{" "}
           <span className={target === "grammar" ? "text-green-400" : "text-yellow-400"}>
             {target === "grammar" ? "gramática" : "cadena de entrada"}
           </span>
         </span>
-        <div className="flex gap-1 ml-auto">
-          {(["qwerty","grammar"] as const).map(s => (
-            <button
-              key={s}
-              onClick={() => setSection(s)}
-              className={`px-3 py-1 text-[10px] rounded transition-all ${
-                section === s ? "bg-zinc-700 text-zinc-200" : "text-zinc-600 hover:text-zinc-400"
-              }`}
-            >
-              {s === "qwerty" ? "QWERTY" : "Símbolos"}
-            </button>
-          ))}
-        </div>
       </div>
 
-      <div className="flex gap-5">
+      <div className="flex gap-4">
 
-        {/* ── Left panel ── */}
-        <div className="flex-1">
+        {/* ── Main keyboard panel ── */}
+        <div className="flex-1 flex flex-col gap-2 min-w-0">
 
-          {/* QWERTY panel */}
-          {section === "qwerty" && (
-            <div className="flex flex-col gap-1.5">
-              {ROWS_UPPER.map((row, ri) => (
-                <div key={ri} className="flex gap-1.5 justify-center">
-                  {row.map(ch => (
-                    <button
-                      key={ch}
-                      onClick={() => pressKey(ch)}
-                      className={`${kc()} h-9 w-9`}
-                    >
-                      {shift ? ch : ch.toLowerCase()}
-                    </button>
-                  ))}
-                </div>
-              ))}
-
-              {/* Bottom action row */}
-              <div className="flex gap-1.5 justify-center mt-1">
-                <button
-                  onClick={() => setShift(s => !s)}
-                  className={`h-9 px-4 rounded border text-xs font-mono transition-all cursor-pointer ${
-                    shift
-                      ? "bg-green-400/15 border-green-400/50 text-green-400"
-                      : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500"
-                  }`}
-                >
-                  ⇧ Shift
-                </button>
-                <button onClick={() => onInsert(" ")} className={`${kc()} h-9 px-10`}>
-                  espacio
-                </button>
-                {target === "grammar" && (
-                  <button onClick={onEnter} className={`${kc()} h-9 px-4`}>
-                    ↵ Enter
-                  </button>
-                )}
-                <button
-                  onClick={onBackspace}
-                  className="h-9 px-4 rounded border bg-zinc-800 border-zinc-700 font-mono text-xs text-zinc-400 hover:text-red-400 hover:border-red-400/40 transition-all cursor-pointer"
-                >
-                  ⌫
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Grammar / symbols panel */}
-          {section === "grammar" && (
-            <div className="flex flex-col gap-1.5">
-              <div className="flex flex-wrap gap-1.5">
-                {GRAMMAR_KEYS.map(k => (
+          {/* QWERTY: cada tecla es flex-1 → ocupa todo el ancho sin márgenes */}
+          <div className="flex flex-col gap-1.5">
+            {ROWS_UPPER.map((row, ri) => (
+              <div key={ri} className="flex gap-1.5">
+                {row.map(ch => (
                   <button
-                    key={k.label}
-                    onClick={() => onInsert(k.value)}
-                    title={k.label}
-                    className={`${kc(k.color)} h-9 px-3 min-w-[2.25rem]`}
+                    key={ch}
+                    onClick={() => pressKey(ch)}
+                    className={`${kc()} h-10 flex-1`}
                   >
-                    {k.label}
+                    {shift ? ch : ch.toLowerCase()}
                   </button>
                 ))}
               </div>
-              <div className="flex gap-1.5 mt-1">
-                <button onClick={() => onInsert(" ")} className={`${kc()} h-9 px-8`}>
-                  espacio
+            ))}
+
+            {/* Action row */}
+            <div className="flex gap-1.5 mt-0.5">
+              <button
+                onClick={() => setShift(s => !s)}
+                className={`h-10 px-4 shrink-0 rounded border text-xs font-mono transition-all cursor-pointer ${
+                  shift
+                    ? "bg-green-400/15 border-green-400/50 text-green-400"
+                    : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500"
+                }`}
+              >
+                ⇧ Shift
+              </button>
+              <button onClick={() => onInsert(" ")} className={`${kc()} h-10 flex-1`}>
+                espacio
+              </button>
+              {target === "grammar" && (
+                <button onClick={onEnter} className={`${kc()} h-10 px-4 shrink-0`}>
+                  ↵ Enter
                 </button>
-                {target === "grammar" && (
-                  <button onClick={onEnter} className={`${kc()} h-9 px-4`}>
-                    ↵ Nueva línea
-                  </button>
-                )}
-                <button
-                  onClick={onBackspace}
-                  className="h-9 px-4 rounded border bg-zinc-800 border-zinc-700 font-mono text-xs text-zinc-400 hover:text-red-400 hover:border-red-400/40 transition-all cursor-pointer"
-                >
-                  ⌫ borrar
-                </button>
-              </div>
+              )}
+              <button
+                onClick={onBackspace}
+                className="h-10 px-4 shrink-0 rounded border bg-zinc-800 border-zinc-700 font-mono text-xs text-zinc-400 hover:text-red-400 hover:border-red-400/40 transition-all cursor-pointer"
+              >
+                ⌫
+              </button>
             </div>
-          )}
+          </div>
+
+          {/* Divider */}
+          <div className="border-t border-zinc-800" />
+
+          {/* Symbols */}
+          <div className="flex flex-col gap-1.5">
+            <p className="text-[10px] text-zinc-600 tracking-widest uppercase">Símbolos</p>
+            <div className="flex flex-wrap gap-1.5">
+              {GRAMMAR_KEYS.map(k => (
+                <button
+                  key={k.label}
+                  onClick={() => onInsert(k.value)}
+                  title={k.label}
+                  className={`${kc(k.color)} h-10 px-3 min-w-[2.5rem]`}
+                >
+                  {k.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
         </div>
 
-        {/* ── Right panel: Analizar ── */}
-        <div className="flex flex-col justify-end gap-2 shrink-0">
+        {/* ── Analizar ── */}
+        <div className="flex shrink-0">
           <button
             onClick={onAnalyze}
             disabled={loading}
-            className="h-full min-h-[5rem] px-7 rounded border text-xs font-mono tracking-widest uppercase transition-all
+            className="w-full px-7 rounded border text-xs font-mono tracking-widest uppercase transition-all
               bg-green-400/10 border-green-400/40 text-green-400
               hover:bg-green-400/20 hover:border-green-400
               disabled:opacity-40 disabled:cursor-not-allowed"

@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { ExportPdfButton } from "./components/Exportpdfbutton";
 import type {
   ParserMethod,
   AutomataView,
@@ -37,6 +38,7 @@ export default function App() {
   // Refs para insertar en la posición del cursor
   const grammarRef  = useRef<HTMLTextAreaElement>(null);
   const inputRef    = useRef<HTMLInputElement>(null);
+  const lrTableRef  = useRef<HTMLDivElement>(null);
   // Cuál campo está activo para el teclado virtual
   const [activeField, setActiveField] = useState<"grammar" | "input">("grammar");
 
@@ -313,6 +315,14 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+                <div>
+                  {activeTab === "table" && lrResponse && (
+                    <ExportPdfButton
+                      result={lrResponse.result}
+                      method={method}
+                    />
+                  )}
+                </div>
               </div>
 
               {currentResult && !currentResult.is_valid && currentResult.error_message && (
@@ -332,7 +342,9 @@ export default function App() {
                 )}
 
                 {activeTab === "table" && lrResponse && (
-                  <LRTableView result={lrResponse.result} />
+                  <div ref={lrTableRef}>
+                  <LRTableView result={lrResponse.result} method={method}/>
+                  </div>
                 )}
 
                 {activeTab === "tree" && rdResponse && (
