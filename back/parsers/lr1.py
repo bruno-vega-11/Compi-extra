@@ -237,6 +237,7 @@ class LR1Parser:
                         error_message=f"Tabla LR(1): no hay acción para (estado {state}, '{token}').",
                         tokens_consumed=pos,
                         total_tokens=len(tokens),
+                        parse_tree=None,
                     )
 
                 kind, val = action
@@ -251,11 +252,13 @@ class LR1Parser:
                     body = list(body)
                     prod_str = f"{head} → {' '.join(body) if body else EPSILON}"
                     
+                    popped_nodes = []
                     if body:
                         for _ in body:
                             state_stack.pop()
                             if node_stack:
-                                node_stack.pop()
+                                popped_nodes.append(node_stack.pop())
+                    popped_nodes.reverse()
                     
                     goto_state = self.goto.get((state_stack[-1], head))
                     if goto_state is None:
@@ -266,20 +269,23 @@ class LR1Parser:
                             error_message=f"Goto no definido para (estado {state_stack[-1]}, '{head}').",
                             tokens_consumed=pos,
                             total_tokens=len(tokens),
+                            parse_tree=None,
                         )
                     
                     add_step("reduce", f"Reduce [{prod_str}] → estado {goto_state}.", production=prod_str)
                     state_stack.append(goto_state)
-                    new_node = ParseNode(symbol=head, children=[])
+                    new_node = ParseNode(symbol=head, children=popped_nodes)
                     node_stack.append(new_node)
                 elif kind == "accept":
                     add_step("accept", "✓ Cadena ACEPTADA.")
+                    parse_tree = node_stack[0].to_dict() if node_stack else None
                     return self._make_result(
                         is_valid=True,
                         steps=steps,
                         error_message=None,
                         tokens_consumed=pos,
                         total_tokens=len(tokens),
+                        parse_tree=parse_tree,
                     )
                 else:
                     add_step("error", f"✗ Acción desconocida: {kind}")
@@ -289,6 +295,7 @@ class LR1Parser:
                         error_message=f"Acción desconocida: {kind}",
                         tokens_consumed=pos,
                         total_tokens=len(tokens),
+                        parse_tree=None,
                     )
 
         except Exception as e:
@@ -298,6 +305,7 @@ class LR1Parser:
                 error_message=str(e),
                 tokens_consumed=pos,
                 total_tokens=len(tokens),
+                parse_tree=None,
             )
 
     # Result formatting similar to SLR1Parser
@@ -369,7 +377,7 @@ class LR1Parser:
             })
         return result
 
-    def _make_result(self, *, is_valid: bool, steps: list, error_message: Optional[str], tokens_consumed: int, total_tokens: int) -> dict:
+    def _make_result(self, *, is_valid: bool, steps: list, error_message: Optional[str], tokens_consumed: int, total_tokens: int, parse_tree: Optional[dict] = None) -> dict:
         action_table, goto_table = self._format_tables()
         first = {
             nt: sorted(v - {EPSILON}) + (["ε"] if EPSILON in v else [])
@@ -381,6 +389,7 @@ class LR1Parser:
         }
         return {
             "is_valid": is_valid,
+            "parse_tree": parse_tree,
             "steps": [s.to_dict() for s in steps],
             "action_table": action_table,
             "goto_table": goto_table,

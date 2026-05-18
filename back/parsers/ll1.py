@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional
 
 from grammar.grammar import Grammar, EPSILON
+from parsers.descenso_recursivo import ParseNode
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Resultado
@@ -49,6 +50,7 @@ class ParseResult:
     error_message: Optional[str]
     tokens_consumed: int
     total_tokens: int
+    parse_tree: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -63,6 +65,7 @@ class ParseResult:
             "error_message":   self.error_message,
             "tokens_consumed": self.tokens_consumed,
             "total_tokens":    self.total_tokens,
+            "parse_tree":      self.parse_tree,
         }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -109,11 +112,13 @@ class LL1Parser:
                 steps=[],
                 error_message="La cadena de entrada está vacía.",
                 tokens_consumed=0,
-                total_tokens=0
+                total_tokens=0,
+                parse_tree=None
             )
 
         tokens_eof = tokens + ["$"]
-        stack = ["$", self.grammar.start_symbol]
+        root_node = ParseNode(symbol=self.grammar.start_symbol)
+        stack = [("$", None), (self.grammar.start_symbol, root_node)]
         pos = 0
         steps: list[ParseStep] = []
         step_n = 0
@@ -125,14 +130,14 @@ class LL1Parser:
                 step_number=step_n,
                 action=action,
                 description=description,
-                stack=list(stack),
+                stack=[s[0] for s in stack],
                 remaining_input=list(tokens_eof[pos:]),
                 production_used=production,
             ))
 
         try:
             while stack:
-                top = stack[-1]
+                top, current_node = stack[-1]
                 current = tokens_eof[pos]
 
                 if top == "$":
@@ -144,7 +149,8 @@ class LL1Parser:
                             steps=steps,
                             error_message=None,
                             tokens_consumed=pos,
-                            total_tokens=len(tokens)
+                            total_tokens=len(tokens),
+                            parse_tree=root_node.to_dict()
                         )
                     else:
                         add_step("error", f"✗ Token '{current}' inesperado al final de la pila.")
@@ -153,14 +159,20 @@ class LL1Parser:
                             steps=steps,
                             error_message=f"Se esperaba '$' pero se encontró '{current}'.",
                             tokens_consumed=pos,
-                            total_tokens=len(tokens)
+                            total_tokens=len(tokens),
+                            parse_tree=None
                         )
 
                 elif top in self.grammar.terminals or top == EPSILON:
                     if top == EPSILON:
+                        if current_node:
+                            current_node.is_terminal = True
                         stack.pop()
                         add_step("match", "Se hizo match de ε (se elimina de la pila).")
                     elif top == current:
+                        if current_node:
+                            current_node.is_terminal = True
+                            current_node.matched_token = current
                         stack.pop()
                         add_step("match", f"Se hizo match de '{current}'.")
                         pos += 1
@@ -171,7 +183,8 @@ class LL1Parser:
                             steps=steps,
                             error_message=f"Se esperaba '{top}' pero se encontró '{current}'.",
                             tokens_consumed=pos,
-                            total_tokens=len(tokens)
+                            total_tokens=len(tokens),
+                            parse_tree=None
                         )
                 
                 else:
@@ -185,14 +198,20 @@ class LL1Parser:
                             steps=steps,
                             error_message=f"Error de sintaxis en el token '{current}'.",
                             tokens_consumed=pos,
-                            total_tokens=len(tokens)
+                            total_tokens=len(tokens),
+                            parse_tree=None
                         )
 
                     stack.pop()
-                    # Push in reverse order
                     if prod != [EPSILON] and prod != []:
-                        for sym in reversed(prod):
-                            stack.append(sym)
+                        children_nodes = [ParseNode(symbol=sym) for sym in prod]
+                        if current_node:
+                            current_node.children = children_nodes
+                        for sym, child in zip(reversed(prod), reversed(children_nodes)):
+                            stack.append((sym, child))
+                    else:
+                        if current_node:
+                            current_node.children = [ParseNode(symbol=EPSILON, is_terminal=True)]
                     
                     prod_str = f"{top} → {' '.join(prod) if prod else EPSILON}"
                     add_step("predict", f"Reemplazar '{top}' usando {prod_str}.", production=prod_str)
@@ -206,7 +225,8 @@ class LL1Parser:
                     steps=steps,
                     error_message=f"Sobran tokens al finalizar parse: '{leftover}'",
                     tokens_consumed=pos,
-                    total_tokens=len(tokens)
+                    total_tokens=len(tokens),
+                    parse_tree=None
                 )
             
             return self._make_result(
@@ -214,7 +234,8 @@ class LL1Parser:
                 steps=steps,
                 error_message=None,
                 tokens_consumed=pos,
-                total_tokens=len(tokens)
+                total_tokens=len(tokens),
+                parse_tree=root_node.to_dict()
             )
 
         except Exception as e:
@@ -223,10 +244,11 @@ class LL1Parser:
                 steps=steps,
                 error_message=str(e),
                 tokens_consumed=pos,
-                total_tokens=len(tokens)
+                total_tokens=len(tokens),
+                parse_tree=None
             )
 
-    def _make_result(self, *, is_valid, steps, error_message, tokens_consumed, total_tokens) -> ParseResult:
+    def _make_result(self, *, is_valid, steps, error_message, tokens_consumed, total_tokens, parse_tree=None) -> ParseResult:
         action_table = self._format_table()
         return ParseResult(
             is_valid=is_valid,
@@ -246,6 +268,7 @@ class LL1Parser:
             error_message=error_message,
             tokens_consumed=tokens_consumed,
             total_tokens=total_tokens,
+            parse_tree=parse_tree,
         )
 
     def _format_table(self) -> dict:

@@ -4,6 +4,7 @@ from collections import defaultdict
 from typing import Optional
 
 from grammar.grammar import Grammar, EPSILON
+from parsers.descenso_recursivo import ParseNode
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -191,6 +192,7 @@ class ParseResult:
     error_message: Optional[str]
     tokens_consumed: int
     total_tokens: int
+    parse_tree: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -205,6 +207,7 @@ class ParseResult:
             "error_message":   self.error_message,
             "tokens_consumed": self.tokens_consumed,
             "total_tokens":    self.total_tokens,
+            "parse_tree":      self.parse_tree,
         }
 
 
@@ -225,6 +228,7 @@ class SLR1Parser:
         tokens_eof = tokens + ["$"]
 
         stack: list[int] = [0]
+        node_stack: list[ParseNode] = []
         pos = 0
         steps: list[ParseStep] = []
         step_n = 0
@@ -265,18 +269,21 @@ class SLR1Parser:
 
             if action == "acc":
                 add_step("accept", "✓ Cadena ACEPTADA.")
+                parse_tree = node_stack[0].to_dict() if node_stack else None
                 return self._make_result(
                     is_valid=True,
                     steps=steps,
                     error_message=None,
                     tokens_consumed=pos,
                     total_tokens=len(tokens),
+                    parse_tree=parse_tree,
                 )
 
             elif action.startswith("s"):
                 next_state = int(action[1:])
                 add_step("shift", f"Shift '{token}' → estado {next_state}.")
                 stack.append(next_state)
+                node_stack.append(ParseNode(symbol=token, is_terminal=True, matched_token=token))
                 pos += 1
 
             elif action.startswith("r"):
@@ -285,8 +292,12 @@ class SLR1Parser:
                 rhs_norm  = _norm_rhs(rhs)
                 prod_str  = f"{lhs} → {' '.join(rhs) if rhs_norm else EPSILON}"
 
+                popped_nodes = []
                 for _ in rhs_norm:
                     stack.pop()
+                    if node_stack:
+                        popped_nodes.append(node_stack.pop())
+                popped_nodes.reverse()
 
                 goto_state = self.table.goto.get((stack[-1], lhs))
                 if goto_state is None:
@@ -300,11 +311,13 @@ class SLR1Parser:
                     )
 
                 stack.append(goto_state)
+                new_node = ParseNode(symbol=lhs, children=popped_nodes)
+                node_stack.append(new_node)
                 add_step("reduce", f"Reduce [{prod_str}] → estado {goto_state}.", production=prod_str)
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
-    def _make_result(self, *, is_valid, steps, error_message, tokens_consumed, total_tokens) -> ParseResult:
+    def _make_result(self, *, is_valid, steps, error_message, tokens_consumed, total_tokens, parse_tree=None) -> ParseResult:
         action_table, goto_table = self._format_tables()
         return ParseResult(
             is_valid=is_valid,
@@ -324,6 +337,7 @@ class SLR1Parser:
             error_message=error_message,
             tokens_consumed=tokens_consumed,
             total_tokens=total_tokens,
+            parse_tree=parse_tree,
         )
 
     def _format_tables(self) -> tuple[dict, dict]:
