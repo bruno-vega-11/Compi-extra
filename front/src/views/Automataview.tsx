@@ -50,11 +50,11 @@ function ExploreReasonPanel({ clickedNodes, currentAutomataData }: { clickedNode
       {revealedConnections.map((c, i) => (
         <div key={i} className={`rounded border p-2 flex flex-col gap-1 ${c.type === "epsilon" ? "border-purple-900/50 bg-purple-950/20" : "border-zinc-800 bg-zinc-900"}`}>
           <div className="flex items-center gap-1 flex-wrap">
-            <span className="text-[10px] font-mono text-indigo-300 truncate max-w-[120px]">{c.fromLabel}</span>
+            <span className="text-[10px] font-mono text-indigo-300 truncate">{c.fromLabel}</span>
             <span className={`text-[10px] font-bold px-1 rounded ${c.type === "epsilon" ? "text-purple-400" : "text-yellow-400"}`}>
               {c.type === "epsilon" ? "─ε→" : `─${c.symbol}→`}
             </span>
-            <span className="text-[10px] font-mono text-green-300 truncate max-w-[120px]">{c.toLabel}</span>
+            <span className="text-[10px] font-mono text-green-300 truncate">{c.toLabel}</span>
           </div>
           {c.reason && <p className="text-[10px] text-zinc-500 leading-relaxed border-t border-zinc-800 pt-1 mt-0.5">{c.reason}</p>}
         </div>
@@ -170,7 +170,7 @@ export function AutomataView({ automata, view, setView, zoom, panX, panY, setZoo
     <div className="p-4 flex flex-col gap-3 h-full relative">
       
       {/* ── CABECERA LIMPIA (Los sliders ya no están estorbando aquí) ── */}
-      <div className="flex items-center gap-4 flex-wrap border-b border-zinc-800 pb-2 flex-shrink-0">
+      <div className="flex items-center gap-4 flex-wrap border-b border-zinc-800 pb-2">
         <div className="flex gap-1">
           {(["afd", "afn", "lr1_afn", "lr1", "lalr1"] as const).map((v) => (
             <button
@@ -207,7 +207,7 @@ export function AutomataView({ automata, view, setView, zoom, panX, panY, setZoo
       </div>
 
       {exploreMode && (
-        <p className="text-[11px] text-indigo-400/80 tracking-wide bg-indigo-950/20 border border-indigo-500/20 px-3 py-1 rounded flex-shrink-0">
+        <p className="text-[11px] text-indigo-400/80 tracking-wide bg-indigo-950/20 border border-indigo-500/20 px-3 py-1 rounded">
           ✨ <strong>Modo Exploración:</strong> Haz clic en los nodos para revelar sus transiciones y ver por qué se conectan.
         </p>
       )}

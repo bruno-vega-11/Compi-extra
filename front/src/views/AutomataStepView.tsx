@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import type { AutomataResponse, AutomataView, GraphNode, GraphLink, ConstructionStep, NFAState, DFAState, LR1State, LALR1State, LR1NFAState, NFATransition, DFATransition } from "../types";
+import type {GraphNode, GraphLink, ConstructionStep} from "../types";
 
 interface Props {
   automata: any;
@@ -133,7 +133,7 @@ function GenericIncrementalView({ view, referenceAutomata, targetAutomata, zoom,
         </div>
 
         <div className="flex-1 flex flex-col gap-3 overflow-hidden">
-          <div className="rounded border border-zinc-800 bg-zinc-950 overflow-hidden relative h-[45%] min-h-[180px] shrink-0">
+          <div className="rounded border border-zinc-800 bg-zinc-950 overflow-hidden relative h-[45%] shrink-0">
             {rightGraphData.nodes.length > 0 ? (
               <AFNHighlightGraph data={rightGraphData} highlightedNodes={leftHighlightedNodes} variant="afd" activeNodeId={activeRightNodeId} activeLink={activeRightLink} zoom={zoom} panX={panX} panY={panY} />
             ) : (

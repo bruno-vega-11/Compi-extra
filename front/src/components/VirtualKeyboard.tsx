@@ -154,7 +154,7 @@ export function VirtualKeyboard({
                   key={k.label}
                   onClick={() => onInsert(k.value)}
                   title={k.label}
-                  className={`${kc(k.color)} h-10 px-3 min-w-[2.5rem]`}
+                  className={`${kc(k.color)} h-10 px-3`}
                 >
                   {k.label}
                 </button>

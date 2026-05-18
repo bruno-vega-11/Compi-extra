@@ -172,7 +172,7 @@ export default function App() {
          className="h-screen bg-zinc-950 text-zinc-100 flex flex-col overflow-hidden">
 
       {/* Header */}
-      <header className="border-b border-zinc-800 px-8 py-4 flex items-center gap-4 flex-shrink-0">
+      <header className="border-b border-zinc-800 px-8 py-4 flex items-center gap-4">
         <span className="text-green-400 text-xl font-bold tracking-widest">{"</>"}</span>
         <h1 className="text-sm font-bold tracking-widest text-zinc-300 uppercase">Analizador Sintáctico</h1>
         <div className="ml-auto flex gap-2">
@@ -185,7 +185,7 @@ export default function App() {
       <div className="flex flex-1 h-[calc(100vh-57px)] overflow-hidden relative">
         
         {/* ── BARRA LATERAL IZQUIERDA CON PANEL DE CÁMARA INCORPORADO ── */}
-        <aside className="w-52 border-r border-zinc-800 p-4 flex flex-col gap-1 flex-shrink-0 bg-zinc-950 overflow-y-auto custom-scrollbar">
+        <aside className="w-52 border-r border-zinc-800 p-4 flex flex-col gap-1 bg-zinc-950 overflow-y-auto custom-scrollbar">
           <p className="text-xs text-zinc-500 uppercase tracking-widest mb-3">Método</p>
           {PARSERS.map((p) => (
             <button
@@ -238,7 +238,7 @@ export default function App() {
                 </div>
 
                 {/* Separador de columna */}
-                <div className="w-[1px] bg-zinc-800 self-stretch my-0.5" />
+                <div className="bg-zinc-800 self-stretch my-0.5" />
 
                 {/* Columna Derecha: Slider Vertical del Eje Y con gran recorrido */}
                 <div className="flex flex-col items-center justify-between w-11 py-0.5">
@@ -271,7 +271,7 @@ export default function App() {
         <main className="flex-1 overflow-y-auto custom-scrollbar flex flex-col bg-zinc-950 relative">
           
           {/* Bloque 1: Entradas e IA */}
-          <div className="flex flex-col flex-shrink-0 pb-4">
+          <div className="flex flex-col pb-4">
             <div className="border-b border-zinc-800 p-6 grid grid-cols-2 gap-6">
               <div className="flex flex-col gap-2">
                 <label className="text-xs text-zinc-500 uppercase tracking-widest">Gramática</label>
@@ -344,7 +344,7 @@ export default function App() {
 
           {/* Bloque 2: Tableros Gráficos */}
           {(hasResponse || automata) && (
-            <div className="flex flex-col p-6 pt-2 gap-4 flex-shrink-0">
+            <div className="flex flex-col p-6 pt-2 gap-4">
               <div className="flex items-center gap-4">
                 {currentResult && (
                   <>
@@ -375,7 +375,7 @@ export default function App() {
               )}
 
               {/* Render de Paneles de Visualización */}
-              <div className="h-[75vh] min-h-[600px] overflow-y-auto rounded border border-zinc-800 bg-zinc-900 relative">
+              <div className="h-[75vh] overflow-y-auto rounded border border-zinc-800 bg-zinc-900 relative">
                 {activeTab === "steps" && !isTabularResponse && rdResponse && <RDStepsView response={rdResponse} />}
                 {activeTab === "steps" && isTabularResponse && lrResponse && <LRStepsView response={lrResponse} method={method} />}
                 
@@ -421,11 +421,11 @@ export default function App() {
           )}
 
           {/* Franja Desplegable del Teclado Fijo */}
-          <div className="sticky bottom-0 bg-zinc-950/95 backdrop-blur-sm border-t border-zinc-800 z-50 w-full flex-shrink-0 px-4 py-2 mt-auto">
+          <div className="sticky bottom-0 bg-zinc-950/95 backdrop-blur-sm border-t border-zinc-800 z-50 w-full px-4 py-2 mt-auto">
             <div className="flex flex-col items-start w-full">
               <button
                 onClick={() => { setShowKeyboard(!showKeyboard); }}
-                className={`px-4 py-1.5 rounded-t-md text-[11px] font-bold uppercase tracking-widest border-t border-x transition-all flex items-center gap-2 -mt-[42px] mb-2 ${
+                className={`px-4 py-1.5 rounded-t-md text-[11px] font-bold uppercase tracking-widest border-t border-x transition-all flex items-center gap-2 mb-2 ${
                   showKeyboard ? "bg-zinc-900 border-zinc-800 text-zinc-400 hover:bg-zinc-800" : "bg-green-400/10 border-green-400/40 text-green-400 shadow-[0_-4px_12px_rgba(74,222,128,0.15)] animate-pulse"
                 }`}
               >
