@@ -9,11 +9,11 @@ instancia el parser correspondiente y devuelve el resultado.
 
 Estructura de rutas:
     POST /parse/recursive-descent   ← Descenso Recursivo  ✅ implementado
-    POST /parse/ll1                 ← LL(1)               🔜 pendiente
-    POST /parse/lr0                 ← LR(0)               🔜 pendiente
-    POST /parse/slr1                ← SLR(1)              🔜 pendiente
-    POST /parse/lalr1               ← LALR(1)             🔜 pendiente
-    POST /parse/lr1                 ← LR(1)               🔜 pendiente
+    POST /parse/ll1                 ← LL(1)               ✅ implementado
+    POST /parse/lr0                 ← LR(0)               ✅ implementado
+    POST /parse/slr1                ← SLR(1)              ✅ implementado
+    POST /parse/lalr1               ← LALR(1)             ✅ implementado
+    POST /parse/lr1                 ← LR(1)               ✅ implementado
     POST /grammar/info              ← Info de la gramática (FIRST, FOLLOW, etc.)
 """
 
